@@ -227,6 +227,12 @@ check $? "the test key is removed from the keyring afterwards"
 ! grep -q "enable-rtsp" bin/unifi-protect
 check $? "enable-rtsp is gone (the integration API rejects channel edits)"
 
+! grep -q "cmd_events" bin/unifi-protect
+check $? "the events subcommand is gone (/events 404s on this API)"
+
+grep -q "qualities=high,medium,low" bin/unifi-protect
+check $? "stream-url asks for every quality so it can fall back"
+
 grep -q "rtsp_disabled_message" bin/unifi-protect
 check $? "a disabled RTSP channel produces actionable guidance"
 

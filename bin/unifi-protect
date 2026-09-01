@@ -22,7 +22,6 @@ snapshot <id> [path]    Fetch a JPEG (defaults to the snapshot cache)
 refresh                 Refresh cached snapshots for every connected camera
 stream-url <id> [q]     Print the RTSPS URL for quality q (high|medium|low)
 play <id> [q]           Open the live stream in mpv
-events [minutes]        Recent events (default 60 minutes)
 ptz-goto <id> <slot>    Move a PTZ camera to a preset slot
 ptz-patrol <id> <slot>  Start a PTZ patrol
 ptz-stop <id>           Stop a PTZ patrol
@@ -213,9 +212,15 @@ rtsp_disabled_message() {
   printf 'RTSP is off for this camera. Open Protect > the camera > Settings > Advanced > RTSP, enable a stream, then try again.'
 }
 
-stream_url_once() {
-  api_request GET "/cameras/${1}/rtsps-stream?qualities=${2}" \
-    | jq -r --arg q "$2" '.[$q] // empty'
+# Asks for every quality at once and prefers the requested one. Enabling RTSP
+# is per-quality in the Protect app, so a console commonly has `high` live and
+# medium/low null — asking only for the configured quality would report the
+# camera as having no stream when it plainly has one.
+stream_url_any() {
+  api_request GET "/cameras/${1}/rtsps-stream?qualities=high,medium,low" \
+    | jq -r --arg q "$2" '(.[$q] // null) as $wanted
+      | if $wanted != null then $wanted
+        else ([to_entries[] | select(.value != null) | .value] | first // empty) end'
 }
 
 # Enables the channel and retries once when the console reports no URL, since
@@ -225,7 +230,7 @@ cmd_stream_url() {
   local id=${1-} quality=${2:-high}
   [[ -n $id ]] || die "usage: unifi-protect stream-url <id> [quality]"
   local url
-  url="$(stream_url_once "$id" "$quality")"
+  url="$(stream_url_any "$id" "$quality")"
   [[ -n $url ]] || die "$(rtsp_disabled_message)"
   printf '%s\n' "$url"
 }
@@ -248,16 +253,6 @@ cmd_play() {
 }
 
 # ------------------------------------------------------------------ events
-
-cmd_events() {
-  local minutes=${1:-60}
-  [[ $minutes =~ ^[0-9]+$ ]] || die "minutes must be numeric"
-  local now start
-  now=$(( $(date +%s) * 1000 ))
-  start=$(( now - minutes * 60000 ))
-  api_request GET "/events?start=${start}&end=${now}" \
-    | jq -r '.[] | [((.start // 0) / 1000 | strftime("%H:%M:%S")), (.type // "event"), (.camera // "")] | @tsv'
-}
 
 # ------------------------------------------------------------------ PTZ
 
@@ -306,7 +301,6 @@ main() {
     export)      cmd_export "$@" ;;
     stream-url)  cmd_stream_url "$@" ;;
     play)        cmd_play "$@" ;;
-    events)      cmd_events "$@" ;;
     ptz-goto)    cmd_ptz_goto "$@" ;;
     ptz-patrol)  cmd_ptz_patrol "$@" ;;
     ptz-stop)    cmd_ptz_stop "$@" ;;

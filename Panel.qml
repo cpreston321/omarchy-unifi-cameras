@@ -59,46 +59,107 @@ Panel {
 
   // ------------------------------------------------------------ live view
 
-  // The camera whose detail view is open, or null for the grid.
-  property var selected: null
-  readonly property bool detailOpen: selected !== null
+  // Selection is held by id: the camera list is replaced wholesale on every
+  // refresh, so an index or an object reference would quietly point at a
+  // different camera the moment one is added or renamed.
+  property string selectedId: ""
+  readonly property var selected: {
+    for (var i = 0; i < root.cameras.length; i++)
+      if (root.cameras[i].id === root.selectedId) return root.cameras[i]
+    return root.cameras.length > 0 ? root.cameras[0] : null
+  }
+  readonly property int onlineCount: {
+    var n = 0
+    for (var i = 0; i < root.cameras.length; i++) if (root.cameras[i].connected) n += 1
+    return n
+  }
+  property bool wantLive: false
   property string streamUrl: ""
+  // Ticks so the snapshot age re-reads the clock; `shotAt` alone would leave
+  // the badge reading "just now" indefinitely.
+  property int ageTick: 0
+
+  readonly property string shotAge: {
+    root.ageTick
+    if (!root.shotAt) return "—"
+    var seconds = Math.max(0, Math.round((Date.now() - root.shotAt.getTime()) / 1000))
+    if (seconds < 10) return "just now"
+    if (seconds < 60) return seconds + "s ago"
+    return Math.round(seconds / 60) + "m ago"
+  }
+
+  readonly property var detailRows: {
+    var camera = root.selected
+    if (!camera) return []
+    var rows = [
+      { label: "Model", value: camera.model },
+      { label: "State", value: camera.connected ? "Connected" : "Disconnected" },
+      { label: "Microphone", value: camera.mic ? "On" : "Off" }
+    ]
+    if (camera.hdr !== "") rows.push({ label: "HDR", value: camera.hdr })
+    if (camera.smart !== "") rows.push({ label: "Smart detection", value: camera.smart })
+    return rows
+  }
   // "connecting" while the URL is being fetched or the player is opening,
   // "live" once frames arrive, "snapshots" when video is unavailable and the
   // view is refreshing stills instead.
   property string liveMode: "connecting"
   property string liveDetail: ""
   property int detailFrame: 0
+  property var shotAt: null
 
-  function openCamera(camera) {
-    root.selected = camera
+  function selectCamera(camera) {
+    if (!camera) return
+    root.selectedId = camera.id
+    root.wantLive = false
     root.streamUrl = ""
     root.liveMode = "connecting"
     root.liveDetail = ""
-    root.detailFrame = 0
-    detailShotProcess.command = [root.cli, "snapshot", camera.id]
-    detailShotProcess.running = true
-    if (camera.connected) {
-      streamProcess.command = [root.cli, "stream-url", camera.id, root.quality]
-      streamProcess.running = true
-    } else {
-      root.liveMode = "snapshots"
-      root.liveDetail = "This camera is offline."
-    }
+    root.liveMode = "snapshots"
+    root.liveDetail = camera.connected ? "" : "This camera is offline."
+    root.refreshSelected()
   }
 
-  function closeCamera() {
-    root.selected = null
-    root.streamUrl = ""
+  function refreshSelected() {
+    if (!root.selected || detailShotProcess.running) return
+    detailShotProcess.command = [root.cli, "snapshot", root.selected.id]
+    detailShotProcess.running = true
+  }
+
+  // Live video is opt-in per camera. Starting a stream makes the console
+  // transcode, so it waits for a deliberate press rather than firing whenever
+  // a camera is selected.
+  function startLive() {
+    if (!root.selected || !root.selected.connected) return
+    root.wantLive = true
     root.liveMode = "connecting"
+    root.liveDetail = ""
+    streamProcess.command = [root.cli, "stream-url", root.selected.id, root.quality]
+    streamProcess.running = true
+  }
+
+  function stopLive() {
+    root.wantLive = false
+    root.streamUrl = ""
+    root.liveMode = "snapshots"
+    root.liveDetail = ""
+    root.refreshSelected()
   }
 
   // Video failed, or was never available. Stills still tell you what the
   // camera sees, so the view degrades to them rather than to an error.
   function fallBackToSnapshots(reason) {
     if (root.liveMode === "live") return
+    root.wantLive = false
     root.liveMode = "snapshots"
-    root.liveDetail = String(reason || "")
+    root.liveDetail = root.humanize(reason)
+  }
+
+  // The CLI prefixes every error with its own name, which belongs in a
+  // terminal and reads as noise in a panel.
+  function humanize(message) {
+    var text = String(message || "").trim()
+    return text.replace(/^unifi-protect:\s*/, "")
   }
 
   // Copy for each non-ready state. Kept in one place so the headline, the
@@ -181,7 +242,7 @@ Panel {
         // `status` already cleared setup problems, so a failure here means the
         // console itself did not answer.
         root.setupState = "unreachable"
-        root.detail = String(listStderr.text || "").trim()
+        root.detail = root.humanize(listStderr.text)
         root.cameras = []
         return
       }
@@ -191,10 +252,16 @@ Panel {
         for (var i = 0; i < parsed.length; i++) {
           var entry = parsed[i]
           if (!entry || !entry.id) continue
+          var smart = entry.smartDetectSettings && entry.smartDetectSettings.objectTypes
+            ? entry.smartDetectSettings.objectTypes : []
           rows.push({
             id: String(entry.id),
             name: String(entry.name || "Camera"),
-            connected: String(entry.state || "") === "CONNECTED"
+            connected: String(entry.state || "") === "CONNECTED",
+            model: String(entry.type || "Camera"),
+            mic: entry.isMicEnabled === true,
+            hdr: String(entry.hdrType || ""),
+            smart: smart.join(", ")
           })
         }
         rows.sort(function(a, b) { return a.name.localeCompare(b.name) })
@@ -213,7 +280,7 @@ Panel {
       root.busy = false
       if (exitCode !== 0) {
         root.setupState = "unreachable"
-        root.detail = String(refreshStderr.text || "").trim()
+        root.detail = root.humanize(refreshStderr.text)
         return
       }
       root.frame += 1
@@ -227,9 +294,9 @@ Panel {
 
   property Process streamProcess: Process {
     onExited: function(exitCode) {
-      if (!root.detailOpen) return
+      if (!root.wantLive) return
       if (exitCode !== 0) {
-        root.fallBackToSnapshots(String(streamStderr.text || "").trim())
+        root.fallBackToSnapshots(streamStderr.text)
         return
       }
       var url = String(streamStdout.text || "").trim()
@@ -244,7 +311,9 @@ Panel {
   // open. Also the poster frame behind the video while it negotiates.
   property Process detailShotProcess: Process {
     onExited: function(exitCode) {
-      if (exitCode === 0 && root.detailOpen) root.detailFrame += 1
+      if (exitCode !== 0) return
+      root.detailFrame += 1
+      root.shotAt = new Date()
     }
   }
 
@@ -261,6 +330,14 @@ Panel {
   // ------------------------------------------------------------------ timers
 
   Timer {
+    id: ageTimer
+    interval: 5000
+    repeat: true
+    running: root.opened && root.ready
+    onTriggered: root.ageTick += 1
+  }
+
+  Timer {
     id: toastTimer
     interval: 2500
     onTriggered: root.toast = ""
@@ -272,20 +349,16 @@ Panel {
     id: detailShotTimer
     interval: 1500
     repeat: true
-    running: root.opened && root.detailOpen && root.liveMode !== "live"
+    running: root.opened && root.ready && root.liveMode !== "live"
       && root.selected !== null && root.selected.connected
-    onTriggered: {
-      if (detailShotProcess.running) return
-      detailShotProcess.command = [root.cli, "snapshot", root.selected.id]
-      detailShotProcess.running = true
-    }
+    onTriggered: root.refreshSelected()
   }
 
   Timer {
     id: pollTimer
     interval: root.refreshSeconds * 1000
     repeat: true
-    running: root.opened && root.ready && !root.detailOpen
+    running: root.opened && root.ready
     onTriggered: root.refreshAll()
   }
 
@@ -297,7 +370,7 @@ Panel {
   }
 
   function close() {
-    root.closeCamera()
+    root.stopLive()
     root.controller.hide()
   }
   function toggle() { root.opened ? root.close() : root.open() }
@@ -317,16 +390,10 @@ Panel {
     bar: root.bar
     open: root.opened
     focusTarget: keyCatcher
-    contentWidth: panel.fittedContentWidth(Style.space(620))
-    // An empty state needs a fraction of the grid's height. Keeping the full
-    // 520 leaves it marooned in dead space, which reads as a broken panel
-    // rather than a deliberate message.
-    // Three sizes, because the panel shows three different things: a grid, one
-    // 16:9 camera, or a short message. An empty state kept at grid height
-    // reads as a broken panel rather than a deliberate one.
-    contentHeight: panel.fittedContentHeight(
-      !root.ready ? Style.space(280)
-        : (root.detailOpen ? Style.space(430) : Style.space(520)))
+    contentWidth: panel.fittedContentWidth(Style.space(460))
+    // A setup message needs a fraction of the height a camera does; keeping
+    // the full size leaves it marooned in dead space.
+    contentHeight: panel.fittedContentHeight(root.ready ? Style.space(676) : Style.space(280))
 
     PanelKeyCatcher {
       id: keyCatcher
@@ -335,137 +402,158 @@ Panel {
       onTabRequested: function(direction) { root.switchPanel(direction) }
     }
 
+    // ----------------------------------------------------------- empty state
+
+    ColumnLayout {
+      visible: !root.ready
+      anchors.centerIn: parent
+      width: Math.min(parent.width - Style.space(32), Style.space(320))
+      spacing: Style.space(8)
+
+      Label {
+        Layout.alignment: Qt.AlignHCenter
+        text: "\udb81\udfae"
+        font.family: root.contentFontFamily
+        font.pixelSize: Style.font.displayLarge
+        color: root.contentForeground
+        opacity: 0.25
+      }
+
+      Label {
+        Layout.fillWidth: true
+        Layout.topMargin: Style.space(4)
+        text: root.emptyState ? root.emptyState.title : ""
+        horizontalAlignment: Text.AlignHCenter
+        wrapMode: Text.WordWrap
+        color: root.contentForeground
+        font.family: root.contentFontFamily
+        font.pixelSize: Style.font.subtitle
+        font.bold: true
+      }
+
+      Label {
+        Layout.fillWidth: true
+        visible: text !== ""
+        text: root.emptyState ? root.emptyState.body : ""
+        horizontalAlignment: Text.AlignHCenter
+        wrapMode: Text.WordWrap
+        lineHeight: 1.25
+        color: root.contentForeground
+        font.family: root.contentFontFamily
+        font.pixelSize: Style.font.bodySmall
+        opacity: 0.65
+      }
+
+      Button {
+        Layout.alignment: Qt.AlignHCenter
+        Layout.topMargin: Style.space(6)
+        visible: root.emptyState !== null && root.emptyState.action !== ""
+        bordered: true
+        text: root.emptyState ? root.emptyState.action : ""
+        onClicked: root.runSetupAction(root.emptyState ? root.emptyState.command : [])
+      }
+
+      // The console's own words, kept small and last. Useful when a
+      // certificate pin or a network fault is the real cause, but never the
+      // headline — that is what the sentences above are for.
+      Label {
+        Layout.fillWidth: true
+        Layout.topMargin: Style.space(4)
+        visible: root.setupState === "unreachable" && root.detail !== ""
+        text: root.detail
+        horizontalAlignment: Text.AlignHCenter
+        wrapMode: Text.WrapAnywhere
+        maximumLineCount: 3
+        elide: Text.ElideRight
+        color: root.contentForeground
+        font.family: root.contentFontFamily
+        font.pixelSize: Style.font.caption
+        opacity: 0.4
+      }
+    }
+
+    // --------------------------------------------------------------- camera
+
     ColumnLayout {
       anchors.fill: parent
       anchors.margins: Style.space(16)
       spacing: Style.space(10)
+      visible: root.ready
 
+      // Title block
       RowLayout {
         Layout.fillWidth: true
         spacing: Style.space(8)
 
-        Button {
-          visible: root.detailOpen
-          iconText: "\uf060"
-          tooltipText: "Back to all cameras"
-          onClicked: root.closeCamera()
-        }
-
-        Label {
-          text: root.detailOpen && root.selected ? root.selected.name : "UniFi Cameras"
-          elide: Text.ElideRight
-          color: root.contentForeground
-          font.family: root.contentFontFamily
-          font.pixelSize: Style.font.body
-          font.bold: true
-        }
-
-        // Live badge doubles as the honest label for what is on screen: solid
-        // when video is playing, hollow while stills stand in for it.
-        RowLayout {
+        ColumnLayout {
           Layout.fillWidth: true
-          spacing: Style.space(5)
-          visible: root.detailOpen
+          spacing: 0
 
-          Rectangle {
-            Layout.preferredWidth: Style.space(6)
-            Layout.preferredHeight: Style.space(6)
-            radius: width / 2
-            color: root.liveMode === "live" ? Color.accent : "transparent"
-            border.width: root.liveMode === "live" ? 0 : 1
-            border.color: root.contentForeground
-            opacity: root.liveMode === "live" ? 1 : 0.4
+          Label {
+            text: "UNIFI CAMERAS"
+            color: root.contentForeground
+            font.family: root.contentFontFamily
+            font.pixelSize: Style.font.heading
+            font.bold: true
+            font.letterSpacing: 0.5
           }
 
           Label {
+            text: root.cameras.length === 0
+              ? root.consoleHost
+              : root.onlineCount + " of " + root.cameras.length + " online · " + root.consoleHost
+            elide: Text.ElideRight
             Layout.fillWidth: true
-            text: root.liveMode === "live" ? "Live"
-              : (root.liveMode === "connecting" ? "Connecting…" : "Snapshots")
             color: root.contentForeground
             font.family: root.contentFontFamily
             font.pixelSize: Style.font.bodySmall
-            opacity: 0.55
+            opacity: 0.5
           }
         }
 
-        Label {
-          Layout.fillWidth: !root.detailOpen
-          visible: !root.detailOpen
-          text: root.consoleHost
-          elide: Text.ElideRight
-          color: root.contentForeground
-          font.family: root.contentFontFamily
-          font.pixelSize: Style.font.bodySmall
-          opacity: 0.45
-        }
-
-        Label {
-          visible: root.toast !== ""
-          text: root.toast
-          color: root.contentForeground
-          font.family: root.contentFontFamily
-          font.pixelSize: Style.font.bodySmall
-          opacity: 0.7
-        }
-
         Button {
-          visible: root.detailOpen
-          iconText: "\udb81\udd1a"
-          tooltipText: "Save a snapshot"
-          enabled: root.selected !== null && root.selected.connected
-          onClicked: root.saveSnapshot(root.selected.id)
-        }
-
-        Button {
-          visible: root.detailOpen
-          iconText: "\uf0aa"
-          tooltipText: "Open in mpv"
-          enabled: root.selected !== null && root.selected.connected
-          onClicked: { root.play(root.selected.id, root.quality); root.close() }
-        }
-
-        Button {
-          visible: !root.detailOpen
-          iconText: "\uf021"
-          tooltipText: "Refresh"
-          enabled: root.ready && !root.busy
-          iconSpinning: root.busy
-          onClicked: root.refreshAll()
+          bordered: true
+          text: "Setup"
+          onClicked: root.runSetupAction(["setup"])
         }
       }
 
-      // Everything below the header shares one flexible row. Without it the
-      // column has nothing that grows, and QGridLayoutEngine spreads the
-      // leftover height evenly across the rows instead — which is what left
-      // the unconfigured panel with its three lines floating far apart.
-      Item {
-        id: body
+      // Camera chips. A Flow rather than a Row so a console with many cameras
+      // wraps instead of pushing the selected one off the edge.
+      Flow {
         Layout.fillWidth: true
-        Layout.fillHeight: true
+        Layout.topMargin: Style.space(2)
+        visible: root.cameras.length > 0
+        spacing: Style.space(6)
 
-        // ------------------------------------------------------- empty state
+        Repeater {
+          model: root.cameras
+
+          delegate: Button {
+            required property var modelData
+            bordered: true
+            selected: root.selected && root.selected.id === modelData.id
+            text: modelData.name
+            onClicked: root.selectCamera(modelData)
+          }
+        }
+      }
+
+      // Selected camera header
+      RowLayout {
+        Layout.fillWidth: true
+        Layout.topMargin: Style.space(2)
+        spacing: Style.space(8)
+        visible: root.selected !== null
 
         ColumnLayout {
-          visible: root.emptyState !== null && !root.detailOpen
-          anchors.centerIn: parent
-          width: Math.min(parent.width - Style.space(32), Style.space(320))
-          spacing: Style.space(8)
-
-          Label {
-            Layout.alignment: Qt.AlignHCenter
-            text: "\udb81\udfae"
-            font.family: root.contentFontFamily
-            font.pixelSize: Style.font.displayLarge
-            color: root.contentForeground
-            opacity: 0.25
-          }
+          Layout.fillWidth: true
+          spacing: 0
 
           Label {
             Layout.fillWidth: true
-            Layout.topMargin: Style.space(4)
-            text: root.emptyState ? root.emptyState.title : ""
-            horizontalAlignment: Text.AlignHCenter
-            wrapMode: Text.WordWrap
+            text: root.selected ? root.selected.name : ""
+            elide: Text.ElideRight
             color: root.contentForeground
             font.family: root.contentFontFamily
             font.pixelSize: Style.font.subtitle
@@ -474,293 +562,141 @@ Panel {
 
           Label {
             Layout.fillWidth: true
-            visible: text !== ""
-            text: root.emptyState ? root.emptyState.body : ""
-            horizontalAlignment: Text.AlignHCenter
-            wrapMode: Text.WordWrap
-            lineHeight: 1.25
+            text: root.selected
+              ? (root.selected.connected ? "Online" : "Offline") + " · " + root.selected.model
+              : ""
+            elide: Text.ElideRight
             color: root.contentForeground
             font.family: root.contentFontFamily
             font.pixelSize: Style.font.bodySmall
-            opacity: 0.65
-          }
-
-          Button {
-            Layout.alignment: Qt.AlignHCenter
-            Layout.topMargin: Style.space(6)
-            visible: root.emptyState !== null && root.emptyState.action !== ""
-            bordered: true
-            text: root.emptyState ? root.emptyState.action : ""
-            onClicked: root.runSetupAction(root.emptyState ? root.emptyState.command : [])
-          }
-
-          // The console's own words, kept small and last. Useful when a
-          // certificate pin or a network fault is the real cause, but never
-          // the headline — that is what the sentences above are for.
-          Label {
-            Layout.fillWidth: true
-            Layout.topMargin: Style.space(4)
-            visible: root.setupState === "unreachable" && root.detail !== ""
-            text: root.detail
-            horizontalAlignment: Text.AlignHCenter
-            wrapMode: Text.WrapAnywhere
-            maximumLineCount: 3
-            elide: Text.ElideRight
-            color: root.contentForeground
-            font.family: root.contentFontFamily
-            font.pixelSize: Style.font.caption
-            opacity: 0.4
+            opacity: 0.5
           }
         }
-        // ------------------------------------------------------ detail view
 
-        ColumnLayout {
+        Button {
+          iconText: "\uf021"
+          tooltipText: "Refresh snapshot"
+          enabled: root.selected !== null && root.selected.connected
+          iconSpinning: detailShotProcess.running
+          onClicked: root.refreshSelected()
+        }
+      }
+
+      // Stage
+      Rectangle {
+        id: stage
+        Layout.fillWidth: true
+        Layout.preferredHeight: Math.round(width * 9 / 16)
+        radius: Style.space(4)
+        color: "#000000"
+        clip: true
+
+        readonly property string posterSource: root.selected
+          ? "file://" + root.snapshotDir + "/" + root.selected.id + ".jpg"
+          : ""
+
+        // The still sits under the video and stays there: poster while the
+        // stream negotiates, and the picture itself when video never arrives.
+        Image {
+          id: poster
           anchors.fill: parent
-          visible: root.detailOpen
-          spacing: Style.space(8)
+          fillMode: Image.PreserveAspectCrop
+          asynchronous: true
+          cache: false
+          source: stage.posterSource
+          opacity: root.selected && root.selected.connected ? 1 : 0.35
 
-          Rectangle {
-            id: stage
-            Layout.fillWidth: true
-            Layout.fillHeight: true
-            radius: Style.space(6)
-            color: "#000000"
-            clip: true
+          Connections {
+            target: root
+            function onDetailFrameChanged() {
+              // Clearing first is what forces a re-read; the filename is
+              // stable, so re-assigning alone is a no-op.
+              poster.source = ""
+              poster.source = stage.posterSource
+            }
+            function onSelectedIdChanged() {
+              poster.source = ""
+              poster.source = stage.posterSource
+            }
+          }
+        }
 
-            readonly property string posterSource: root.selected
-              ? "file://" + root.snapshotDir + "/" + root.selected.id + ".jpg"
-              : ""
+        // QtMultimedia may not be installed, and a failed import takes down
+        // whatever component declares it. A Loader keeps that a missing
+        // feature rather than a broken panel.
+        Loader {
+          id: playerLoader
+          anchors.fill: parent
+          active: root.wantLive && root.streamUrl !== ""
+          source: Qt.resolvedUrl("LivePlayer.qml")
+          visible: item !== null && item.playing
 
-            // The still sits under the video and stays there: it is the poster
-            // while the stream negotiates, and the picture itself when video
-            // never arrives.
-            Image {
-              id: poster
-              anchors.fill: parent
-              fillMode: Image.PreserveAspectFit
-              asynchronous: true
-              cache: false
-              source: stage.posterSource
+          onStatusChanged: {
+            if (status === Loader.Error)
+              root.fallBackToSnapshots("Video playback is unavailable on this system.")
+          }
 
-              Connections {
-                target: root
-                function onDetailFrameChanged() {
-                  poster.source = ""
-                  poster.source = stage.posterSource
-                }
-                function onSelectedChanged() {
-                  poster.source = ""
-                  poster.source = stage.posterSource
-                }
-              }
+          onLoaded: {
+            item.url = Qt.binding(function() { return root.streamUrl })
+            item.active = Qt.binding(function() { return root.wantLive })
+            item.failed.connect(function(message) { root.fallBackToSnapshots(message) })
+          }
+        }
+
+        Connections {
+          target: playerLoader.item
+          ignoreUnknownSignals: true
+          function onPlayingChanged() {
+            if (playerLoader.item && playerLoader.item.playing) {
+              root.liveMode = "live"
+              root.liveDetail = ""
+            }
+          }
+        }
+
+        Label {
+          anchors.centerIn: parent
+          visible: poster.status !== Image.Ready && !(playerLoader.item && playerLoader.item.playing)
+          text: root.liveMode === "connecting" ? "Connecting…" : "No picture"
+          color: "#ffffff"
+          font.family: root.contentFontFamily
+          font.pixelSize: Style.font.bodySmall
+          opacity: 0.5
+        }
+
+        // Says what is actually on screen, which is not always what was asked
+        // for — a stream that never opened still shows stills.
+        Rectangle {
+          anchors.left: parent.left
+          anchors.bottom: parent.bottom
+          anchors.margins: Style.space(8)
+          width: badge.implicitWidth + Style.space(14)
+          height: badge.implicitHeight + Style.space(8)
+          radius: Style.space(3)
+          color: Qt.rgba(0, 0, 0, 0.65)
+          visible: root.selected !== null
+
+          RowLayout {
+            id: badge
+            anchors.centerIn: parent
+            spacing: Style.space(5)
+
+            Rectangle {
+              Layout.preferredWidth: Style.space(6)
+              Layout.preferredHeight: Style.space(6)
+              radius: width / 2
+              color: root.liveMode === "live" ? Color.accent : "transparent"
+              border.width: root.liveMode === "live" ? 0 : 1
+              border.color: "#ffffff"
+              opacity: root.liveMode === "live" ? 1 : 0.6
             }
 
-            // QtMultimedia may not be installed. A Loader keeps that a missing
-            // feature instead of a broken panel — an error status simply means
-            // the stills below are what the viewer gets.
-            Loader {
-              id: playerLoader
-              anchors.fill: parent
-              active: root.detailOpen && root.streamUrl !== ""
-              source: Qt.resolvedUrl("LivePlayer.qml")
-              visible: item !== null && item.playing
-
-              onStatusChanged: {
-                if (status === Loader.Error)
-                  root.fallBackToSnapshots("Video playback is unavailable on this system.")
-              }
-
-              onLoaded: {
-                item.url = Qt.binding(function() { return root.streamUrl })
-                item.active = Qt.binding(function() { return root.detailOpen })
-                item.failed.connect(function(message) { root.fallBackToSnapshots(message) })
-              }
-            }
-
-            Connections {
-              target: playerLoader.item
-              ignoreUnknownSignals: true
-              function onPlayingChanged() {
-                if (playerLoader.item && playerLoader.item.playing) {
-                  root.liveMode = "live"
-                  root.liveDetail = ""
-                }
-              }
-            }
-
-            // Shown only when there is nothing to look at yet: no poster has
-            // arrived and no video is playing.
             Label {
-              anchors.centerIn: parent
-              visible: poster.status !== Image.Ready && !(playerLoader.item && playerLoader.item.playing)
-              text: root.liveMode === "connecting" ? "Connecting…" : "No picture"
+              text: root.liveMode === "live" ? "Live"
+                : (root.liveMode === "connecting" ? "Connecting…" : "Snapshot · " + root.shotAge)
               color: "#ffffff"
               font.family: root.contentFontFamily
-              font.pixelSize: Style.font.bodySmall
-              opacity: 0.5
-            }
-          }
-
-          Label {
-            Layout.fillWidth: true
-            visible: root.liveMode === "snapshots" && root.liveDetail !== ""
-            text: root.liveDetail
-            horizontalAlignment: Text.AlignHCenter
-            wrapMode: Text.WordWrap
-            maximumLineCount: 2
-            elide: Text.ElideRight
-            color: root.contentForeground
-            font.family: root.contentFontFamily
-            font.pixelSize: Style.font.caption
-            opacity: 0.45
-          }
-        }
-        // ------------------------------------------------------- camera grid
-
-        Flickable {
-          anchors.fill: parent
-          visible: root.ready && root.cameras.length > 0 && !root.detailOpen
-          clip: true
-          contentHeight: grid.implicitHeight
-          boundsBehavior: Flickable.StopAtBounds
-
-          GridLayout {
-            id: grid
-            width: parent.width
-            columns: 2
-            columnSpacing: Style.space(8)
-            rowSpacing: Style.space(8)
-
-            Repeater {
-              model: root.cameras
-
-              delegate: Rectangle {
-                id: card
-                required property var modelData
-
-                Layout.fillWidth: true
-                // 16:9, the aspect every Protect camera actually records in —
-                // so the thumbnail is the frame, not a crop of it.
-                Layout.preferredHeight: Math.round(width * 9 / 16)
-                radius: Style.space(6)
-                color: "#000000"
-                clip: true
-
-                readonly property bool hot: cardHover.hovered
-                readonly property string snapshotSource: "file://" + root.snapshotDir + "/" + card.modelData.id + ".jpg"
-
-                Image {
-                  id: shot
-                  anchors.fill: parent
-                  fillMode: Image.PreserveAspectCrop
-                  asynchronous: true
-                  cache: false
-                  source: card.snapshotSource
-                  opacity: card.modelData.connected ? 1 : 0.35
-
-                  Connections {
-                    target: root
-                    function onFrameChanged() {
-                      // Clearing first is what actually forces a re-read; the
-                      // filename is stable, so re-assigning alone is a no-op.
-                      shot.source = ""
-                      shot.source = card.snapshotSource
-                    }
-                  }
-                }
-
-                Label {
-                  anchors.centerIn: parent
-                  visible: shot.status !== Image.Ready
-                  text: card.modelData.connected ? "No snapshot yet" : "Offline"
-                  color: "#ffffff"
-                  font.family: root.contentFontFamily
-                  font.pixelSize: Style.font.bodySmall
-                  opacity: 0.45
-                }
-
-                // Play affordance on hover, so it is obvious the tile opens a
-                // live view rather than just being a picture.
-                Rectangle {
-                  anchors.centerIn: parent
-                  width: Style.space(38)
-                  height: width
-                  radius: width / 2
-                  visible: card.hot && card.modelData.connected
-                  color: Qt.rgba(0, 0, 0, 0.45)
-                  border.width: 1
-                  border.color: Qt.rgba(1, 1, 1, 0.7)
-
-                  Label {
-                    anchors.centerIn: parent
-                    text: "\uf04b"
-                    color: "#ffffff"
-                    font.family: root.contentFontFamily
-                    font.pixelSize: Style.font.body
-                  }
-                }
-
-                // A gradient rather than a bar: the name stays readable over a
-                // bright frame without stamping a black block across it.
-                Rectangle {
-                  anchors.left: parent.left
-                  anchors.right: parent.right
-                  anchors.bottom: parent.bottom
-                  height: Style.space(34)
-                  gradient: Gradient {
-                    GradientStop { position: 0.0; color: "transparent" }
-                    GradientStop { position: 1.0; color: Qt.rgba(0, 0, 0, 0.75) }
-                  }
-
-                  RowLayout {
-                    anchors.fill: parent
-                    anchors.leftMargin: Style.space(8)
-                    anchors.rightMargin: Style.space(8)
-                    anchors.bottomMargin: Style.space(2)
-                    spacing: Style.space(6)
-
-                    Rectangle {
-                      Layout.preferredWidth: Style.space(6)
-                      Layout.preferredHeight: Style.space(6)
-                      radius: width / 2
-                      color: card.modelData.connected ? Color.accent : Color.urgent
-                    }
-
-                    Label {
-                      Layout.fillWidth: true
-                      text: card.modelData.name
-                      elide: Text.ElideRight
-                      color: "#ffffff"
-                      font.family: root.contentFontFamily
-                      font.pixelSize: Style.font.bodySmall
-                    }
-                  }
-                }
-
-                // Drawn last so the hover ring sits above the image and the
-                // gradient rather than being covered by them.
-                Rectangle {
-                  anchors.fill: parent
-                  radius: parent.radius
-                  color: "transparent"
-                  border.width: card.hot ? Math.max(1, Style.space(2)) : Style.normalBorderWidth
-                  border.color: card.hot ? Color.accent : Style.normalBorderColor
-                  opacity: card.hot ? 1 : 0.5
-                }
-
-                HoverHandler {
-                  id: cardHover
-                  cursorShape: card.modelData.connected ? Qt.PointingHandCursor : Qt.ArrowCursor
-                }
-
-                TapHandler {
-                  acceptedButtons: Qt.LeftButton | Qt.RightButton
-                  onSingleTapped: function(point, button) {
-                    if (button === Qt.RightButton) root.saveSnapshot(card.modelData.id)
-                    else root.openCamera(card.modelData)
-                  }
-                }
-              }
+              font.pixelSize: Style.font.caption
             }
           }
         }
@@ -768,14 +704,103 @@ Panel {
 
       Label {
         Layout.fillWidth: true
-        visible: root.ready && root.cameras.length > 0 && !root.detailOpen
-        text: "Click to watch · Right-click to save a snapshot"
-        horizontalAlignment: Text.AlignHCenter
+        visible: root.liveMode === "snapshots" && root.liveDetail !== ""
+        text: root.liveDetail
+        wrapMode: Text.WordWrap
+        maximumLineCount: 2
+        elide: Text.ElideRight
         color: root.contentForeground
         font.family: root.contentFontFamily
-        font.pixelSize: Style.font.bodySmall
-        opacity: 0.5
+        font.pixelSize: Style.font.caption
+        opacity: 0.45
       }
+
+      // Actions
+      GridLayout {
+        Layout.fillWidth: true
+        columns: 2
+        columnSpacing: Style.space(8)
+        rowSpacing: Style.space(8)
+        visible: root.selected !== null
+
+        Button {
+          Layout.fillWidth: true
+          bordered: true
+          enabled: root.selected !== null && root.selected.connected
+          text: root.wantLive ? "Stop Live" : "Live Video"
+          onClicked: root.wantLive ? root.stopLive() : root.startLive()
+        }
+
+        Button {
+          Layout.fillWidth: true
+          bordered: true
+          enabled: root.selected !== null && root.selected.connected
+          text: "Open in mpv"
+          onClicked: { root.play(root.selected.id, root.quality); root.close() }
+        }
+
+        Button {
+          Layout.fillWidth: true
+          bordered: true
+          enabled: root.selected !== null && root.selected.connected
+          text: "Refresh Snapshot"
+          onClicked: root.refreshSelected()
+        }
+
+        Button {
+          Layout.fillWidth: true
+          bordered: true
+          enabled: root.selected !== null && root.selected.connected
+          text: "Save Photo"
+          onClicked: root.saveSnapshot(root.selected.id)
+        }
+      }
+
+      // Details. The integration API has no events collection on 7.2.105 —
+      // /events answers 404 while every other collection answers 200 — so this
+      // slot carries what the console does report rather than an empty feed.
+      Label {
+        Layout.fillWidth: true
+        Layout.topMargin: Style.space(4)
+        visible: root.selected !== null
+        text: root.toast !== "" ? root.toast.toUpperCase() : "CAMERA DETAILS"
+        color: root.contentForeground
+        font.family: root.contentFontFamily
+        font.pixelSize: Style.font.caption
+        font.bold: true
+        opacity: 0.45
+      }
+
+      Repeater {
+        model: root.detailRows
+
+        delegate: RowLayout {
+          required property var modelData
+          Layout.fillWidth: true
+          spacing: Style.space(8)
+
+          Label {
+            Layout.preferredWidth: Style.space(120)
+            text: modelData.label
+            color: root.contentForeground
+            font.family: root.contentFontFamily
+            font.pixelSize: Style.font.bodySmall
+            opacity: 0.55
+          }
+
+          Label {
+            Layout.fillWidth: true
+            text: modelData.value
+            elide: Text.ElideRight
+            horizontalAlignment: Text.AlignRight
+            color: root.contentForeground
+            font.family: root.contentFontFamily
+            font.pixelSize: Style.font.bodySmall
+          }
+        }
+      }
+
+      Item { Layout.fillWidth: true; Layout.fillHeight: true }
     }
   }
 }
