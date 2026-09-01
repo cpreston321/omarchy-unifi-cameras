@@ -425,9 +425,11 @@ Panel {
     open: root.opened
     focusTarget: keyCatcher
     contentWidth: panel.fittedContentWidth(Style.space(460))
-    // A setup message needs a fraction of the height a camera does; keeping
-    // the full size leaves it marooned in dead space.
-    contentHeight: panel.fittedContentHeight(root.ready ? Style.space(676) : Style.space(280))
+    // Measured, not guessed. A fixed height leaves dead space under a console
+    // with one camera and clips one with several, and the difference between
+    // the setup message and a full camera view is most of the panel.
+    contentHeight: panel.fittedContentHeight(
+      root.ready ? cameraView.implicitHeight + Style.space(32) : Style.space(300))
 
     PanelKeyCatcher {
       id: keyCatcher
@@ -509,9 +511,10 @@ Panel {
     // --------------------------------------------------------------- camera
 
     ColumnLayout {
+      id: cameraView
       anchors.fill: parent
       anchors.margins: Style.space(16)
-      spacing: Style.space(10)
+      spacing: 0
       visible: root.ready
 
       // Title block
@@ -521,7 +524,7 @@ Panel {
 
         ColumnLayout {
           Layout.fillWidth: true
-          spacing: 0
+          spacing: Style.space(2)
 
           Label {
             text: "UNIFI CAMERAS"
@@ -556,7 +559,7 @@ Panel {
       // wraps instead of pushing the selected one off the edge.
       Flow {
         Layout.fillWidth: true
-        Layout.topMargin: Style.space(2)
+        Layout.topMargin: Style.space(14)
         visible: root.cameras.length > 0
         spacing: Style.space(6)
 
@@ -576,13 +579,13 @@ Panel {
       // Selected camera header
       RowLayout {
         Layout.fillWidth: true
-        Layout.topMargin: Style.space(2)
+        Layout.topMargin: Style.space(16)
         spacing: Style.space(8)
         visible: root.selected !== null
 
         ColumnLayout {
           Layout.fillWidth: true
-          spacing: 0
+          spacing: Style.space(1)
 
           Label {
             Layout.fillWidth: true
@@ -620,8 +623,9 @@ Panel {
       Rectangle {
         id: stage
         Layout.fillWidth: true
+        Layout.topMargin: Style.space(8)
         Layout.preferredHeight: Math.round(width * 9 / 16)
-        radius: Style.space(4)
+        radius: Style.space(5)
         color: "#000000"
         clip: true
 
@@ -790,6 +794,7 @@ Panel {
 
       Label {
         Layout.fillWidth: true
+        Layout.topMargin: Style.space(7)
         visible: root.liveMode === "snapshots" && root.liveDetail !== ""
         text: root.liveDetail
         wrapMode: Text.WordWrap
@@ -804,6 +809,7 @@ Panel {
       // Actions
       GridLayout {
         Layout.fillWidth: true
+        Layout.topMargin: Style.space(10)
         columns: 2
         columnSpacing: Style.space(8)
         visible: root.selected !== null
@@ -825,51 +831,81 @@ Panel {
         }
       }
 
+      // A rule marks the break between acting on this camera and reading about
+      // it. Without one the details read as more controls.
+      PanelSeparator {
+        Layout.fillWidth: true
+        Layout.topMargin: Style.space(16)
+        visible: root.selected !== null
+      }
+
       // Details. The integration API has no events collection on 7.2.105 —
       // /events answers 404 while every other collection answers 200 — so this
       // slot carries what the console does report rather than an empty feed.
-      Label {
+      RowLayout {
         Layout.fillWidth: true
-        Layout.topMargin: Style.space(4)
+        Layout.topMargin: Style.space(12)
         visible: root.selected !== null
-        text: root.toast !== "" ? root.toast.toUpperCase() : "CAMERA DETAILS"
-        color: root.contentForeground
-        font.family: root.contentFontFamily
-        font.pixelSize: Style.font.caption
-        font.bold: true
-        opacity: 0.45
+        spacing: Style.space(8)
+
+        Label {
+          Layout.fillWidth: true
+          text: "CAMERA DETAILS"
+          color: root.contentForeground
+          font.family: root.contentFontFamily
+          font.pixelSize: Style.font.caption
+          font.bold: true
+          font.letterSpacing: 0.5
+          opacity: 0.45
+        }
+
+        // Confirmations belong beside the heading, not in place of it — the
+        // heading used to be replaced by the toast, which meant the section
+        // lost its label for as long as the message showed.
+        Label {
+          visible: root.toast !== ""
+          text: root.toast
+          color: root.contentForeground
+          font.family: root.contentFontFamily
+          font.pixelSize: Style.font.caption
+          opacity: 0.55
+        }
       }
 
-      Repeater {
-        model: root.detailRows
+      ColumnLayout {
+        Layout.fillWidth: true
+        Layout.topMargin: Style.space(8)
+        spacing: Style.space(6)
 
-        delegate: RowLayout {
-          required property var modelData
-          Layout.fillWidth: true
-          spacing: Style.space(8)
+        Repeater {
+          model: root.detailRows
 
-          Label {
-            Layout.preferredWidth: Style.space(120)
-            text: modelData.label
-            color: root.contentForeground
-            font.family: root.contentFontFamily
-            font.pixelSize: Style.font.bodySmall
-            opacity: 0.55
-          }
-
-          Label {
+          delegate: RowLayout {
+            required property var modelData
             Layout.fillWidth: true
-            text: modelData.value
-            elide: Text.ElideRight
-            horizontalAlignment: Text.AlignRight
-            color: root.contentForeground
-            font.family: root.contentFontFamily
-            font.pixelSize: Style.font.bodySmall
+            spacing: Style.space(10)
+
+            Label {
+              text: modelData.label
+              color: root.contentForeground
+              font.family: root.contentFontFamily
+              font.pixelSize: Style.font.bodySmall
+              opacity: 0.5
+            }
+
+            Label {
+              Layout.fillWidth: true
+              text: modelData.value
+              elide: Text.ElideRight
+              horizontalAlignment: Text.AlignRight
+              color: root.contentForeground
+              font.family: root.contentFontFamily
+              font.pixelSize: Style.font.bodySmall
+            }
           }
         }
       }
 
-      Item { Layout.fillWidth: true; Layout.fillHeight: true }
     }
   }
 }
