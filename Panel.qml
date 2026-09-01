@@ -557,10 +557,12 @@ Panel {
 
       // Camera chips. A Flow rather than a Row so a console with many cameras
       // wraps instead of pushing the selected one off the edge.
+      // A selector for one camera is just its name printed twice, directly
+      // above the header that already names it.
       Flow {
         Layout.fillWidth: true
         Layout.topMargin: Style.space(14)
-        visible: root.cameras.length > 0
+        visible: root.cameras.length > 1
         spacing: Style.space(6)
 
         Repeater {

@@ -281,6 +281,13 @@ check $? "every path out of live view stops the relay"
 grep -q "sourceSize.width" Panel.qml
 check $? "snapshots are decoded at display size rather than scaled from 4K"
 
+grep -q "root.cameras.length > 1" Panel.qml
+check $? "the camera selector hides when there is only one camera"
+
+# A single spacing value makes every gap equally important, so nothing groups.
+[[ $(grep -c "Layout.topMargin" Panel.qml) -ge 8 ]]
+check $? "vertical gaps are set per boundary rather than inherited"
+
 grep -q "rtsp_disabled_message" bin/unifi-protect
 check $? "a disabled RTSP channel produces actionable guidance"
 
