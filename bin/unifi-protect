@@ -12,7 +12,8 @@ usage() {
   cat <<'USAGE'
 usage: unifi-protect <command> [args]
 
-setup <host> [port]     Pin the console's certificate, store an API key (stdin), verify
+setup [host] [port]     Find or pin a console, store an API key (stdin), verify
+scan                    Find UniFi Protect consoles on this network
 key-set                 Replace the stored API key, read from stdin
 forget                  Remove the stored key and config
 check                   Verify connectivity and print console identity
@@ -31,15 +32,111 @@ probe <path>            Raw GET against the integration API, for verification
 USAGE
 }
 
+# ------------------------------------------------------------------ discovery
+
+# A console answers the integration API with 401 when no key is presented.
+# That is a far better fingerprint than a TLS certificate or an open port:
+# plenty of things serve HTTPS on 443, but only Protect serves this path.
+readonly API_PROBE_PATH='/meta/info'
+readonly SCAN_PARALLEL=48
+readonly SCAN_MAX_HOSTS=512
+
+scan_probe() {
+  local ip=$1 out=$2 code
+  code="$(curl --silent --output /dev/null --write-out '%{http_code}' \
+    --insecure --proto '=https' --noproxy '*' --no-location \
+    --connect-timeout 1 --max-time 3 \
+    "https://${ip}/proxy/protect/integration/v1${API_PROBE_PATH}" 2>/dev/null)" || return 0
+  [[ $code == 401 || $code == 200 ]] && printf '%s\n' "$ip" >> "$out"
+  return 0
+}
+
+# Hosts worth probing: everything this machine has spoken to recently, plus the
+# /24 around its own address. A console is nearly always one or the other, and
+# sweeping wider costs seconds for no realistic gain.
+scan_candidates() {
+  local self_ips prefix
+  self_ips="$(ip -4 -o addr show scope global 2>/dev/null | awk '{print $4}')"
+
+  {
+    ip neigh show 2>/dev/null | awk '$1 ~ /^[0-9]+\./ {print $1}'
+    local cidr
+    for cidr in $self_ips; do
+      prefix="${cidr%.*}"
+      seq -f "${prefix}.%g" 1 254
+    done
+  } | sort -u -t. -k1,1n -k2,2n -k3,3n -k4,4n | head -n "$SCAN_MAX_HOSTS"
+}
+
+cmd_scan() {
+  require_tools curl ip
+  local tmp batch=0
+  tmp="$(mktemp)"
+  # shellcheck disable=SC2064
+  trap "rm -f '$tmp'" RETURN
+
+  local ip
+  while IFS= read -r ip; do
+    [[ -n $ip ]] || continue
+    scan_probe "$ip" "$tmp" &
+    batch=$((batch + 1))
+    if (( batch >= SCAN_PARALLEL )); then
+      wait
+      batch=0
+    fi
+  done < <(scan_candidates)
+  wait
+
+  sort -u "$tmp"
+}
+
 # ------------------------------------------------------------------ setup
+
+# Offers what the scan found, and falls back to asking. Always returns a host
+# on stdout, or empty if the user declined everything.
+setup_choose_host() {
+  local -a found=()
+  printf 'Looking for a UniFi Protect console on this network…\n' >&2
+  mapfile -t found < <(cmd_scan)
+
+  if [[ ${#found[@]} -eq 1 ]]; then
+    local answer
+    printf 'Found a console at %s. Use it? [Y/n] ' "${found[0]}" >&2
+    read -r answer || true
+    if [[ -z $answer || $answer =~ ^[Yy] ]]; then
+      printf '%s\n' "${found[0]}"
+      return
+    fi
+  elif [[ ${#found[@]} -gt 1 ]]; then
+    local index=1 choice
+    printf 'Found %d consoles:\n' "${#found[@]}" >&2
+    for host in "${found[@]}"; do
+      printf '  %d) %s\n' "$index" "$host" >&2
+      index=$((index + 1))
+    done
+    printf 'Choose one [1-%d], or press Enter to type an address: ' "${#found[@]}" >&2
+    read -r choice || true
+    if [[ $choice =~ ^[0-9]+$ ]] && (( choice >= 1 && choice <= ${#found[@]} )); then
+      printf '%s\n' "${found[choice - 1]}"
+      return
+    fi
+  else
+    printf 'No console answered on this network.\n' >&2
+  fi
+
+  local typed
+  printf 'Console IP or hostname: ' >&2
+  read -r typed || true
+  printf '%s\n' "$typed"
+}
 
 cmd_setup() {
   local host=${1-} port=${2:-443}
-  # The panel's "Connect a console…" button opens a terminal on `setup` with no
-  # argument, so the host is prompted for rather than required.
+  # The panel's setup button opens a terminal on `setup` with no argument, so
+  # the console is discovered rather than demanded. Typing an IP address off
+  # the back of a rack-mounted NVR is a poor first impression.
   if [[ -z $host && -t 0 ]]; then
-    printf 'Console IP or hostname: ' >&2
-    read -r host
+    host="$(setup_choose_host)"
   fi
   [[ -n $host ]] || die "usage: unifi-protect setup <host> [port]"
   [[ $host =~ ^[A-Za-z0-9._-]+$ ]] || die "invalid host"
@@ -370,6 +467,7 @@ main() {
   [[ $# -gt 0 ]] && shift || true
   case $cmd in
     setup)       cmd_setup "$@" ;;
+    scan)        cmd_scan "$@" ;;
     key-set)     cmd_key_set "$@" ;;
     forget)      cmd_forget "$@" ;;
     check)       cmd_check "$@" ;;

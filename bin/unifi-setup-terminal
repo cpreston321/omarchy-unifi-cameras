@@ -8,14 +8,16 @@ set -euo pipefail
 
 SELF_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 
+# A host is optional: with none, `setup` scans the network and offers what it
+# finds, which is the whole point of running this from the launcher.
 host=${1-}
-if [[ -z $host ]]; then
-  printf 'usage: unifi-setup-terminal <console-host>\n' >&2
-  exit 2
-fi
 
 status=0
-"$SELF_DIR/unifi-protect" setup "$host" || status=$?
+if [[ -n $host ]]; then
+  "$SELF_DIR/unifi-protect" setup "$host" || status=$?
+else
+  "$SELF_DIR/unifi-protect" setup || status=$?
+fi
 
 printf '\n'
 read -rsn1 -p 'Press any key to close…' || true

@@ -289,6 +289,25 @@ check $? "the camera selector hides when there is only one camera"
 ! grep -q "anchors.margins: Style.space(16)" Panel.qml
 check $? "the content does not double up on the panel's own padding"
 
+# Discovery fingerprints the integration API rather than an open port: plenty
+# of things serve HTTPS on 443, only Protect serves this path.
+grep -q "proxy/protect/integration/v1" bin/unifi-protect
+check $? "the scan probes the integration API path"
+
+grep -q 'code == 401 || \$code == 200' bin/unifi-protect
+check $? "an unauthenticated 401 is what identifies a console"
+
+grep -q "setup_choose_host" bin/unifi-protect
+check $? "setup offers what the scan found instead of demanding an address"
+
+jq -e '.workflow.items[0].allowEmpty == true and (.workflow.items[0].emptyCommand | length) > 0' \
+  omalaunch.json >/dev/null
+check $? "the launcher setup entry scans when submitted empty"
+
+# A scan that sweeps every reachable subnet costs seconds for no real gain.
+grep -q "SCAN_MAX_HOSTS" bin/unifi-protect
+check $? "the scan is bounded"
+
 # A single spacing value makes every gap equally important, so nothing groups.
 [[ $(grep -c "Layout.topMargin" Panel.qml) -ge 8 ]]
 check $? "vertical gaps are set per boundary rather than inherited"

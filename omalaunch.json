@@ -4,31 +4,56 @@
   "capability": "unifi-cameras-setup",
   "mode": "workflow",
   "label": "UniFi Cameras Setup",
-  "prefixes": ["unifi"],
-  "icon": "󰞮",
+  "prefixes": [
+    "unifi"
+  ],
+  "icon": "\udb81\udfae",
   "description": "Connect a UniFi Protect console",
   "rootDescription": "Connect and manage a UniFi Protect console",
-  "requires": ["curl", "jq", "openssl", "secret-tool", "omarchy-launch-terminal"],
+  "requires": [
+    "curl",
+    "jq",
+    "openssl",
+    "secret-tool",
+    "omarchy-launch-terminal"
+  ],
   "workflow": {
     "items": [
       {
         "id": "connect",
         "kind": "input",
-        "label": "Connect a console…",
-        "description": "Pin the certificate and store an API key",
-        "prompt": "Console IP or hostname",
+        "label": "Connect a console\u2026",
+        "description": "Press Enter to scan, or type an address",
+        "prompt": "Console address (Enter to scan)",
         "maxLength": 253,
-        "command": ["omarchy-launch-terminal", "{extensionDir}/bin/unifi-setup-terminal", "{input}"]
+        "command": [
+          "omarchy-launch-terminal",
+          "{extensionDir}/bin/unifi-setup-terminal",
+          "{input}"
+        ],
+        "allowEmpty": true,
+        "emptyCommand": [
+          "omarchy-launch-terminal",
+          "{extensionDir}/bin/unifi-setup-terminal"
+        ]
       },
       {
         "id": "rekey",
         "kind": "input",
-        "label": "Replace the API key…",
+        "label": "Replace the API key\u2026",
         "description": "Opens a terminal to paste a new key",
         "prompt": "Press Enter to continue",
         "allowEmpty": true,
-        "emptyCommand": ["omarchy-launch-terminal", "{extensionDir}/bin/unifi-protect", "key-set"],
-        "command": ["omarchy-launch-terminal", "{extensionDir}/bin/unifi-protect", "key-set"]
+        "emptyCommand": [
+          "omarchy-launch-terminal",
+          "{extensionDir}/bin/unifi-protect",
+          "key-set"
+        ],
+        "command": [
+          "omarchy-launch-terminal",
+          "{extensionDir}/bin/unifi-protect",
+          "key-set"
+        ]
       },
       {
         "id": "refresh",
@@ -38,8 +63,14 @@
         "prompt": "Press Enter to refresh",
         "allowEmpty": true,
         "refreshExtensions": true,
-        "emptyCommand": ["{extensionDir}/bin/unifi-protect", "refresh"],
-        "command": ["{extensionDir}/bin/unifi-protect", "refresh"]
+        "emptyCommand": [
+          "{extensionDir}/bin/unifi-protect",
+          "refresh"
+        ],
+        "command": [
+          "{extensionDir}/bin/unifi-protect",
+          "refresh"
+        ]
       },
       {
         "id": "check",
@@ -48,8 +79,16 @@
         "description": "Verify the pin and stored key still work",
         "prompt": "Press Enter to test",
         "allowEmpty": true,
-        "emptyCommand": ["omarchy-launch-terminal", "{extensionDir}/bin/unifi-protect", "check"],
-        "command": ["omarchy-launch-terminal", "{extensionDir}/bin/unifi-protect", "check"]
+        "emptyCommand": [
+          "omarchy-launch-terminal",
+          "{extensionDir}/bin/unifi-protect",
+          "check"
+        ],
+        "command": [
+          "omarchy-launch-terminal",
+          "{extensionDir}/bin/unifi-protect",
+          "check"
+        ]
       }
     ]
   }

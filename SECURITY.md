@@ -47,6 +47,12 @@ match `^[A-Za-z0-9]{4,64}$` and drops anything else — a name like `../../etc/p
 never becomes a path. The test suite asserts this against a fixture that contains
 one.
 
+**Discovery only probes the local network, and reads nothing.** `scan` sends an
+unauthenticated GET to one integration-API path across this machine's ARP
+neighbours and the /24 around its own address, with a one-second connect
+timeout and no credential attached. It is bounded to 512 hosts, does not follow
+redirects, and never leaves the LAN.
+
 **Config is written atomically with restrictive modes.** `~/.config/omarchy-unifi/`
 is `0700` and the config file is written `0600` to a temporary file and renamed,
 so a partial write is never read back as truth.

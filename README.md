@@ -34,13 +34,20 @@ Then create an API key on the console — **UniFi OS → Control Plane →
 Integrations → Create API Key** — and connect:
 
 ```bash
-~/.config/omarchy/plugins/quantumfire.unifi-cameras/bin/unifi-protect setup 192.168.1.1
+~/.config/omarchy/plugins/quantumfire.unifi-cameras/bin/unifi-protect setup
 ```
 
-`setup` reads the console's certificate, stores its public-key fingerprint,
+With no address, `setup` scans the network and offers what it finds, so you do
+not have to go looking for your console's IP. It identifies one by asking the
+integration API for `/meta/info` without a key: only Protect answers that path
+with a 401. Pass an address to skip the scan.
+
+It then reads the console's certificate, stores its public-key fingerprint,
 prompts for the API key, saves the key in the Secret Service, and verifies the
-connection. You can also do all of this from the launcher: type `unifi` in
-Omalaunch and pick **Connect a console…**.
+connection. `unifi-protect scan` runs discovery on its own.
+
+You can do all of this from the launcher instead: type `unifi` in Omalaunch,
+pick **Connect a console…**, and press Enter to scan.
 
 ## Using it
 
@@ -61,6 +68,7 @@ unifi-protect play <id> [quality]  # live view in mpv
 unifi-protect snapshot <id>        # JPEG into the cache
 unifi-protect export <id>          # JPEG into ~/Pictures/UniFi/
 unifi-protect ptz-goto <id> <slot> # PTZ preset
+unifi-protect scan                 # find consoles on this network
 unifi-protect probe /cameras       # raw API response
 ```
 
