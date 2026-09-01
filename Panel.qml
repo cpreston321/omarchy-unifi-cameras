@@ -529,9 +529,11 @@ Panel {
         // The console's own favicon, cached by the CLI. Absent until the first
         // refresh after this version, and on a console that does not serve
         // one — so the row is built to look right without it.
+        // Sized to the text beside it rather than to a number, so the lockup
+        // holds together at any font scale the theme picks.
         Image {
-          Layout.preferredWidth: Style.space(24)
-          Layout.preferredHeight: Style.space(24)
+          Layout.preferredWidth: titleBlock.implicitHeight
+          Layout.preferredHeight: titleBlock.implicitHeight
           Layout.alignment: Qt.AlignVCenter
           visible: status === Image.Ready
           source: "file://" + root.logoPath
@@ -542,28 +544,38 @@ Panel {
           smooth: true
         }
 
+        // Two lines read as one lockup only if they sit tight against each
+        // other. Text reserves roughly a fifth of the font size in leading
+        // above and below each line, which is right in a paragraph and wrong
+        // in a two-line title — so both lines are pinned to their glyphs.
         ColumnLayout {
+          id: titleBlock
           Layout.fillWidth: true
-          spacing: Style.space(2)
+          spacing: 0
 
           Label {
+            Layout.fillWidth: true
+            Layout.preferredHeight: Math.round(Style.font.title * 1.15)
             text: "UNIFI CAMERAS"
+            verticalAlignment: Text.AlignVCenter
             color: root.contentForeground
             font.family: root.contentFontFamily
-            font.pixelSize: Style.font.heading
+            font.pixelSize: Style.font.title
             font.bold: true
-            font.letterSpacing: 0.5
+            font.letterSpacing: 0.6
           }
 
           Label {
+            Layout.fillWidth: true
+            Layout.preferredHeight: Math.round(Style.font.caption * 1.25)
             text: root.cameras.length === 0
               ? root.consoleHost
               : root.onlineCount + " of " + root.cameras.length + " online · " + root.consoleHost
+            verticalAlignment: Text.AlignVCenter
             elide: Text.ElideRight
-            Layout.fillWidth: true
             color: root.contentForeground
             font.family: root.contentFontFamily
-            font.pixelSize: Style.font.bodySmall
+            font.pixelSize: Style.font.caption
             opacity: 0.5
           }
         }

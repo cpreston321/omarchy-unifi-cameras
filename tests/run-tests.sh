@@ -338,6 +338,11 @@ check $? "the logo is fetched from the console"
 grep -q "status === Image.Ready" Panel.qml
 check $? "the title row renders correctly without a cached logo"
 
+# The lockup has to survive a theme that scales fonts, so the logo is bound to
+# the text block rather than set to a number.
+grep -q "Layout.preferredHeight: titleBlock.implicitHeight" Panel.qml
+check $? "the logo is sized from the title block, not a hardcoded value"
+
 # A single spacing value makes every gap equally important, so nothing groups.
 [[ $(grep -c "Layout.topMargin" Panel.qml) -ge 8 ]]
 check $? "vertical gaps are set per boundary rather than inherited"
