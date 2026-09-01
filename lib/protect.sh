@@ -229,11 +229,11 @@ api_request() {
 # whatever dimensions the header claims — so the header is read here, before
 # anything renders it, rather than trusting the console.
 snapshot_valid() {
-  python3 - "$1" <<'PYTHON'
+  python3 - "$1" "$MAX_SNAPSHOT_PIXELS" <<'PYTHON'
 import struct, sys
 
-MAX_PIXELS = 40_000_000
 path = sys.argv[1]
+MAX_PIXELS = int(sys.argv[2])
 
 with open(path, "rb") as handle:
     data = handle.read(1024 * 128)

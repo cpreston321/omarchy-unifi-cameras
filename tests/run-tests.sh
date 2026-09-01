@@ -440,8 +440,13 @@ printf 'not an image' > "$TMP/notjpeg.bin"
 ! snapshot_valid "$TMP/notjpeg.bin"
 check $? "a snapshot that is not a JPEG is refused"
 
-grep -q "MAX_SNAPSHOT_PIXELS\|MAX_PIXELS" lib/protect.sh
-check $? "snapshots are bounded by decode cost, not only by byte size"
+grep -q 'python3 - "\$1" "\$MAX_SNAPSHOT_PIXELS"' lib/protect.sh
+check $? "the decode-cost limit has one definition, passed in rather than duplicated"
+
+magick -size 9000x9000 xc:red "$TMP/bomb.jpg" 2>/dev/null && {
+  ! snapshot_valid "$TMP/bomb.jpg"
+  check $? "a frame too costly to decode is refused"
+}
 
 grep -q 'written <= MAX_SNAPSHOT_BYTES' lib/protect.sh
 check $? "the byte budget is checked against what landed, not the declared length"
