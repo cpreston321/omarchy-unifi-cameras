@@ -281,6 +281,14 @@ Panel {
     "no-cameras":  { title: "No cameras",             body: "This console has no cameras adopted." }
   })
 
+  // Which half of setup is outstanding. Referenced by the setup controls'
+  // visibility, so an undeclared name here reads as `visible: true` rather
+  // than as an error.
+  readonly property bool needsConsole: root.setupState === "no-console"
+    || root.setupState === "bad-config" || root.setupState === "unreachable"
+  readonly property bool needsKey: root.setupState === "no-key"
+    || root.setupState === "bad-key"
+
   readonly property var emptyState: {
     var key = root.ready ? (root.cameras.length === 0 ? "no-cameras" : "") : root.setupState
     return key === "" ? null : (root.emptyStates[key] || root.emptyStates["unreachable"])

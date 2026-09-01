@@ -38,6 +38,9 @@ else
   skipt "shellcheck not installed"
 fi
 
+python3 tests/qml-references-test.py >/dev/null 2>&1
+check $? "every root reference in Panel.qml is declared"
+
 # ---------------------------------------------------------------- qml
 
 # qmllint cannot resolve QtObject-grouped properties like Style.font or the
