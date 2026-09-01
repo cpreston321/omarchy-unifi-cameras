@@ -41,10 +41,12 @@ def load_cameras():
         if not ID_RE.match(cam_id):
             continue
         name = str(entry.get("name") or "Camera").strip()[:64] or "Camera"
-        flags = entry.get("featureFlags")
-        can_ptz = bool(isinstance(flags, dict) and flags.get("canOpticalZoom")) or bool(
-            isinstance(flags, dict) and flags.get("isPtz")
-        )
+        # Verified against Protect 7.2.105: featureFlags carries no PTZ key at
+        # all (it holds hasHdr, hasMic, smartDetectTypes and friends), so the
+        # model name in `type` is the only reliable signal — "G5 PTZ" and the
+        # like. Guessing from featureFlags would silently never fire.
+        model = str(entry.get("type") or "")
+        can_ptz = "ptz" in model.lower()
         cameras.append(
             {
                 "id": cam_id,

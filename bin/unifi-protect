@@ -21,7 +21,6 @@ cameras [--json]        List cameras
 snapshot <id> [path]    Fetch a JPEG (defaults to the snapshot cache)
 refresh                 Refresh cached snapshots for every connected camera
 stream-url <id> [q]     Print the RTSPS URL for quality q (high|medium|low)
-enable-rtsp <id> [q]    Turn on the RTSP channel a stream URL requires
 play <id> [q]           Open the live stream in mpv
 events [minutes]        Recent events (default 60 minutes)
 ptz-goto <id> <slot>    Move a PTZ camera to a preset slot
@@ -206,27 +205,28 @@ cmd_export() {
 
 # ------------------------------------------------------------------ streaming
 
-# Protect ships with RTSP off on every channel. The stream URL endpoint returns
-# nothing useful until the channel is enabled, so `play` calls this first.
-cmd_enable_rtsp() {
-  local id=${1-} quality=${2:-high}
-  [[ -n $id ]] || die "usage: unifi-protect enable-rtsp <id> [quality]"
-  local channel
-  case $quality in
-    high) channel=0 ;; medium) channel=1 ;; low) channel=2 ;;
-    *) die "quality must be high, medium, or low" ;;
-  esac
-  api_request PATCH "/cameras/${id}" \
-    "$(jq -nc --argjson ch "$channel" '{channels: [{id: $ch, isRtspEnabled: true}]}')" >/dev/null
+# Verified against Protect 7.2.105: the integration API's camera object has no
+# channels and no RTSP field, and PATCH /cameras/{id} rejects both with an AJV
+# "must NOT have additional properties" error. RTSP can only be turned on in the
+# Protect app, so the only useful thing to do here is say so.
+rtsp_disabled_message() {
+  printf 'RTSP is off for this camera. Open Protect > the camera > Settings > Advanced > RTSP, enable a stream, then try again.'
 }
 
+stream_url_once() {
+  api_request GET "/cameras/${1}/rtsps-stream?qualities=${2}" \
+    | jq -r --arg q "$2" '.[$q] // empty'
+}
+
+# Enables the channel and retries once when the console reports no URL, since
+# Protect ships with RTSP off and "no stream" is a setup state rather than a
+# failure. Callers get a URL or an error, never a silent empty line.
 cmd_stream_url() {
   local id=${1-} quality=${2:-high}
   [[ -n $id ]] || die "usage: unifi-protect stream-url <id> [quality]"
   local url
-  url="$(api_request GET "/cameras/${id}/rtsps-stream?qualities=${quality}" \
-    | jq -r --arg q "$quality" '.[$q] // empty')"
-  [[ -n $url ]] || die "no ${quality} stream; run 'unifi-protect enable-rtsp $id $quality'"
+  url="$(stream_url_once "$id" "$quality")"
+  [[ -n $url ]] || die "$(rtsp_disabled_message)"
   printf '%s\n' "$url"
 }
 
@@ -236,7 +236,6 @@ cmd_play() {
   local id=${1-} quality=${2:-high}
   [[ -n $id ]] || die "usage: unifi-protect play <id> [quality]"
   require_tools mpv
-  cmd_enable_rtsp "$id" "$quality" || true
   local url title
   url="$(cmd_stream_url "$id" "$quality")"
   title="$(camera_name "$id")"
@@ -305,7 +304,6 @@ main() {
     snapshot)    cmd_snapshot "$@" ;;
     refresh)     cmd_refresh "$@" ;;
     export)      cmd_export "$@" ;;
-    enable-rtsp) cmd_enable_rtsp "$@" ;;
     stream-url)  cmd_stream_url "$@" ;;
     play)        cmd_play "$@" ;;
     events)      cmd_events "$@" ;;

@@ -6,16 +6,18 @@ official local integration API, an API key stored in the Secret Service, and a
 pinned certificate. No Ubiquiti account, no cloud round-trip, no camera daemon
 added to Omarchy.
 
-> **Status: `0.1.0` is unverified against hardware.** Every endpoint below is
-> implemented and the whole offline surface is tested, but the author has not
-> yet run it against a live console. See
-> [docs/verifying-against-hardware.md](docs/verifying-against-hardware.md) —
-> `unifi-protect probe` exists to make that a ten-minute job.
+> **Status: `0.1.0`, verified against UniFi Protect 7.2.105.** Setup, camera
+> listing, snapshots, and the panel are confirmed working on real hardware.
+> Live video depends on RTSP being enabled per camera in the Protect app — see
+> [Live video](#live-video). PTZ is still unverified for lack of a PTZ camera.
+> [docs/verifying-against-hardware.md](docs/verifying-against-hardware.md)
+> records what each endpoint actually returned.
 
 ## Requirements
 
 Everything is stock on Omarchy: `curl`, `jq`, `openssl`, `secret-tool` (GNOME
-Keyring), `mpv`, `python3`. Nothing extra to install.
+Keyring), `mpv`, `python3`. `qt6-multimedia` is optional and only adds in-panel
+video; the plugin works without it.
 
 On the console side you need **UniFi Protect 5.3 or newer** on UniFi OS, which
 is where the local integration API and API keys landed.
@@ -74,14 +76,23 @@ Set on the bar entry in `~/.config/omarchy/shell.json`:
 
 ## Live video
 
-Protect ships with RTSP **disabled on every channel**, so the first `play` for a
-given camera and quality turns that channel on (`isRtspEnabled`) before asking
-for a stream URL. Streams are RTSPS on port 7441 and the URL carries a
-per-channel alias that grants access — so it goes to mpv through a stdin
-playlist rather than the command line, where another user could read it.
+Protect ships with RTSP **disabled on every camera**, and the local integration
+API cannot turn it on: the camera object it exposes has no channels and no RTSP
+field, and `PATCH /cameras/{id}` rejects both. So enabling it is a one-time
+manual step per camera:
 
-If mpv fails to open the stream, that is the first thing to debug; see
-[PLATFORM_NOTES.md](PLATFORM_NOTES.md).
+**Protect → the camera → Settings → Advanced → RTSP → enable a stream.**
+
+Until then the panel shows that camera as refreshing stills rather than live
+video, and says so. Once enabled, streams are RTSPS on port 7441 and the URL
+carries a per-camera alias that grants access — so it reaches both mpv and the
+in-panel player without ever passing through a command line another user could
+read.
+
+Clicking a camera opens it in the panel: live video where RTSP is on, stills
+otherwise, with buttons to save a snapshot or hand the stream to mpv. In-panel
+video needs `qt6-multimedia`; without it the view falls back to stills and the
+rest of the plugin is unaffected.
 
 ## Storage
 

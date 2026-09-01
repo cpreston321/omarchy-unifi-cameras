@@ -222,6 +222,20 @@ secret-tool clear application omarchy-unifi kind api-key host 198.51.100.1 2>/de
 ! secret-tool lookup application omarchy-unifi kind api-key host 198.51.100.1 >/dev/null 2>&1
 check $? "the test key is removed from the keyring afterwards"
 
+# Hardware findings, pinned so a refactor cannot quietly reintroduce them.
+# Verified against UniFi Protect 7.2.105.
+! grep -q "enable-rtsp" bin/unifi-protect
+check $? "enable-rtsp is gone (the integration API rejects channel edits)"
+
+grep -q "rtsp_disabled_message" bin/unifi-protect
+check $? "a disabled RTSP channel produces actionable guidance"
+
+grep -q 'in model.lower()' bin/omalaunch-provider
+check $? "PTZ is detected from the model name, not a featureFlags key"
+
+! grep -q 'isPtz\|canOpticalZoom' bin/omalaunch-provider
+check $? "the provider no longer reads featureFlags keys Protect does not send"
+
 # ------------------------------------------------- Omalaunch schema conformance
 
 OMALAUNCH="${OMALAUNCH_PATH:-$HOME/Documents/projects/omalaunch}"

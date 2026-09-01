@@ -1,7 +1,7 @@
 [
-  {"id": "66aa11bb22cc33dd44ee55ff", "name": "Front Door", "state": "CONNECTED", "type": "camera", "featureFlags": {"isPtz": false}},
-  {"id": "77bb22cc33dd44ee55ff66aa", "name": "Driveway PTZ", "state": "CONNECTED", "type": "camera", "featureFlags": {"isPtz": true}},
-  {"id": "88cc33dd44ee55ff66aa77bb", "name": "Garage", "state": "DISCONNECTED", "type": "camera", "featureFlags": {}},
+  {"id": "66aa11bb22cc33dd44ee55ff", "name": "Front Door", "state": "CONNECTED", "type": "UVC G6 Pro Bullet", "featureFlags": {"hasHdr": true}},
+  {"id": "77bb22cc33dd44ee55ff66aa", "name": "Driveway PTZ", "state": "CONNECTED", "type": "UVC G5 PTZ", "featureFlags": {"hasHdr": true}},
+  {"id": "88cc33dd44ee55ff66aa77bb", "name": "Garage", "state": "DISCONNECTED", "type": "UVC G4 Doorbell", "featureFlags": {}},
   {"id": "../../etc/passwd", "name": "Injected", "state": "CONNECTED", "featureFlags": {}},
   {"name": "No id", "state": "CONNECTED"}
 ]

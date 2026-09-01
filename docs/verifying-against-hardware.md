@@ -1,9 +1,10 @@
 # Verifying against real hardware
 
-This plugin was written against Ubiquiti's published integration API but has not
-been run against a live console. `unifi-protect probe` performs a raw GET and
-prints whatever comes back, so each assumption below can be confirmed or
-corrected quickly. Work down the list; each step depends on the one before it.
+Steps 1-3 and 5 are **confirmed** against UniFi Protect 7.2.105 on a UDM-class
+console with a UVC G6 Pro Bullet. Step 4 is confirmed as *not possible* through
+this API, and step 6 remains unverified for lack of a PTZ camera. `unifi-protect
+probe` performs a raw GET and prints whatever comes back, so re-checking any of
+this on different firmware takes a minute.
 
 ## 1. The key and the pin work
 
@@ -21,11 +22,15 @@ key is wrong or was revoked.
 unifi-protect probe /cameras | jq '.[0] | {id, name, state, modelKey, featureFlags}'
 ```
 
-The panel and the launcher provider read `id`, `name`, and `state`, and treat
-`state == "CONNECTED"` as online. The provider looks for `featureFlags.isPtz` to
-decide whether to offer preset navigation. **If your firmware names the PTZ flag
-differently, `bin/omalaunch-provider` needs one line changed** — it is the single
-most likely mismatch in this repo.
+**Confirmed on 7.2.105.** The camera object carries exactly:
+`activePatrolSlot, featureFlags, guid, hasPackageCamera, hdrType, id,
+isMicEnabled, ledSettings, mac, micVolume, modelKey, name, osdSettings,
+smartDetectSettings, state, type, videoMode`.
+
+`featureFlags` holds `hasHdr, hasLedStatus, hasMic, hasSpeaker,
+smartDetectAudioTypes, smartDetectTypes, supportFullHdSnapshot, videoModes` —
+**no PTZ key of any kind**. PTZ is therefore detected from the model name in
+`type`, which reads like `UVC G6 Pro Bullet` or `UVC G5 PTZ`.
 
 ## 3. Snapshots return a JPEG
 
@@ -37,21 +42,32 @@ file ~/.cache/omarchy-unifi/snapshots/*.jpg
 Expected: `JPEG image data`. If the body is JSON, the endpoint wants different
 query parameters than `?highQuality=true`.
 
-## 4. RTSP can be enabled and a URL comes back
+## 4. RTSP cannot be enabled through this API
 
 ```bash
 id=$(unifi-protect probe /cameras | jq -r '.[0].id')
-unifi-protect enable-rtsp "$id" high
 unifi-protect probe "/cameras/$id/rtsps-stream?qualities=high"
 ```
 
-The code expects an object keyed by quality (`{"high": "rtsps://…"}`). If it is
-an array or nests the URL, `cmd_stream_url` in `bin/unifi-protect` needs its `jq`
-expression adjusted.
+**Confirmed on 7.2.105.** The response shape is an object keyed by quality, as
+the code expects — but every value is null until RTSP is enabled:
 
-Also confirm the PATCH body shape: the code sends
-`{"channels":[{"id":0,"isRtspEnabled":true}]}` and assumes channel 0/1/2 map to
-high/medium/low. Compare against `probe /cameras | jq '.[0].channels'`.
+```json
+{"high":null,"medium":null,"low":null,"package":null}
+```
+
+And it cannot be enabled from here. The camera object has no `channels` and no
+RTSP field, and `PATCH /cameras/{id}` answers 400 for any attempt to add one:
+
+```json
+{"error":"Failed to parse 'request-body'","name":"AJV_PARSE_ERROR",
+ "issues":[{"message":"must NOT have additional properties"}]}
+```
+
+So enabling RTSP is a manual, per-camera step in the Protect app:
+**Protect → the camera → Settings → Advanced → RTSP**. The `enable-rtsp`
+subcommand was removed because it could never have worked; `stream-url` now says
+this instead of failing opaquely.
 
 ## 5. Events come back in the window asked for
 
