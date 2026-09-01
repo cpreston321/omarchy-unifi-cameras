@@ -27,7 +27,7 @@ is where the local integration API and API keys landed.
 ## Installation
 
 ```bash
-omarchy plugin add https://github.com/cpreston/omarchy-unifi-cameras --enable
+omarchy plugin add https://github.com/cpreston321/omarchy-unifi-cameras --enable
 ```
 
 Then create an API key on the console — **UniFi OS → Control Plane →
