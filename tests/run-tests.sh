@@ -246,6 +246,14 @@ check $? "mpv is told not to verify the console's self-signed stream cert"
 grep -q "rtsp-transport=tcp" bin/unifi-protect
 check $? "the stream is pulled over TCP rather than UDP"
 
+# Qt reports the TLS rejection as "Could not open file", which points readers
+# at a missing path rather than the certificate.
+! grep -q "failed.connect(function(message) { root.fallBackToSnapshots(message)" Panel.qml
+check $? "the panel does not relay Qt's misleading player error"
+
+grep -q "self-signed certificate" Panel.qml
+check $? "the video fallback names the real cause and the remedy"
+
 grep -q "rtsp_disabled_message" bin/unifi-protect
 check $? "a disabled RTSP channel produces actionable guidance"
 

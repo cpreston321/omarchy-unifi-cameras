@@ -152,6 +152,17 @@ Panel {
   // Video failed, or was never available. The request to watch this camera
   // stands — stills just refresh in video's place, a second apart — so
   // wantLive is deliberately left set.
+  // Qt reports the certificate rejection as "Could not open file", which sends
+  // anyone reading it looking for a missing path. The cause is known and the
+  // remedy is one button away, so say that instead of relaying its words.
+  function videoUnavailable() {
+    if (root.liveMode === "live") return
+    root.liveMode = "snapshots"
+    root.liveDetail = "In-panel video can't skip the console's self-signed certificate. "
+      + "Showing stills — use Open in mpv for full video."
+    root.refreshSelected()
+  }
+
   function fallBackToSnapshots(reason) {
     if (root.liveMode === "live") return
     root.liveMode = "snapshots"
@@ -640,13 +651,13 @@ Panel {
 
           onStatusChanged: {
             if (status === Loader.Error)
-              root.fallBackToSnapshots("Video playback is unavailable on this system.")
+              root.fallBackToSnapshots("In-panel video needs qt6-multimedia. Use Open in mpv.")
           }
 
           onLoaded: {
             item.url = Qt.binding(function() { return root.streamUrl })
             item.active = Qt.binding(function() { return root.wantLive })
-            item.failed.connect(function(message) { root.fallBackToSnapshots(message) })
+            item.failed.connect(function(message) { root.videoUnavailable() })
           }
         }
 
