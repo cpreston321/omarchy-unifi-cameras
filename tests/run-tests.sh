@@ -7,6 +7,17 @@ set -uo pipefail
 ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
+# The suite runs real commands, and some of them delete things. cache_dir
+# reads XDG_CACHE_HOME before HOME, so overriding HOME alone left `forget`
+# pointed at the user's actual snapshot cache — which it duly removed on every
+# run. Both roots are sandboxed here so no individual test can reach real data
+# by forgetting one of them.
+SANDBOX="$(mktemp -d)"
+trap 'rm -rf "$SANDBOX"' EXIT
+export XDG_CACHE_HOME="$SANDBOX/cache"
+export XDG_CONFIG_HOME="$SANDBOX/config"
+mkdir -p "$XDG_CACHE_HOME" "$XDG_CONFIG_HOME"
+
 pass=0; fail=0; skip=0
 ok()   { printf 'ok   - %s\n' "$1"; pass=$((pass + 1)); }
 no()   { printf 'FAIL - %s\n' "$1"; fail=$((fail + 1)); }
@@ -95,8 +106,8 @@ api_key_valid "$(printf 'abcdEFGH01234567\nheader = "X-Evil: 1"')" \
 
 # ---------------------------------------------------------------- cli
 
-TMP="$(mktemp -d)"
-trap 'rm -rf "$TMP"' EXIT
+TMP="$SANDBOX/work"
+mkdir -p "$TMP"
 CFG="$TMP/config"
 
 # Every subcommand must be reachable from the dispatcher. `probe` was defined
@@ -131,7 +142,7 @@ grep -q "missing console.host" <<<"$out"
 check $? "a config without a host is reported as such"
 
 # `forget` has to work on a half-configured system rather than dying first.
-XDG_CONFIG_HOME="$CFG" HOME="$TMP" ./bin/unifi-protect forget >/dev/null 2>&1
+XDG_CONFIG_HOME="$CFG" ./bin/unifi-protect forget >/dev/null 2>&1
 check $? "forget succeeds without a usable config"
 
 # A configured console with no key in the keyring is the state right after
@@ -382,6 +393,11 @@ check $? "a disabled RTSP channel produces actionable guidance"
 
 ! grep -q 'isPtz\|canOpticalZoom' bin/unifi-protect
 check $? "nothing reads featureFlags keys Protect does not send"
+
+# A destructive command must never reach the real cache, whichever variable
+# happens to be set in the environment running the tests.
+[[ $(bash -c 'source lib/protect.sh; cache_dir') == "$SANDBOX"* ]]
+check $? "the suite's cache directory is sandboxed away from the user's"
 
 # ---------------------------------------------------------- security baseline
 #
