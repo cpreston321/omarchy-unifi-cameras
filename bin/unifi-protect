@@ -244,8 +244,13 @@ cmd_play() {
   local url title
   url="$(cmd_stream_url "$id" "$quality")"
   title="$(camera_name "$id")"
+  # FFmpeg verifies the peer certificate by default, and a UniFi console serves
+  # a self-signed one issued to an internal name, so RTSPS fails outright
+  # without this. Transport trust for the stream is the LAN itself; the HTTP
+  # API keeps its certificate pin, which is where credentials actually travel.
   printf '%s\n' "$url" | mpv --playlist=- \
     --no-config --load-scripts=no --terminal=no \
+    --demuxer-lavf-o=tls_verify=0 --rtsp-transport=tcp \
     --profile=low-latency --cache=no --untimed \
     --title="${title:-UniFi camera}" \
     --force-media-title="${title:-UniFi camera}" &

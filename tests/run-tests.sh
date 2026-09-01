@@ -233,6 +233,19 @@ check $? "the events subcommand is gone (/events 404s on this API)"
 grep -q "qualities=high,medium,low" bin/unifi-protect
 check $? "stream-url asks for every quality so it can fall back"
 
+# Live video only starts on a press, so the resting badge must not claim a
+# connection is being attempted.
+grep -q 'property string liveMode: "snapshots"' Panel.qml
+check $? "the panel rests on snapshots rather than a phantom 'Connecting…'"
+
+# FFmpeg verifies peer certificates by default and a UniFi console serves a
+# self-signed one, so RTSPS fails outright without this. Verified on 7.2.105.
+grep -q "tls_verify=0" bin/unifi-protect
+check $? "mpv is told not to verify the console's self-signed stream cert"
+
+grep -q "rtsp-transport=tcp" bin/unifi-protect
+check $? "the stream is pulled over TCP rather than UDP"
+
 grep -q "rtsp_disabled_message" bin/unifi-protect
 check $? "a disabled RTSP channel produces actionable guidance"
 

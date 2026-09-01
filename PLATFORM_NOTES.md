@@ -19,7 +19,14 @@ in order:
 1. **Confirm the stream URL exists.** `unifi-protect stream-url <id> high`. If it
    reports RTSP is off, enable it in the Protect app as above.
 2. **Try the URL directly.** `unifi-protect stream-url <id> high | mpv --playlist=-`.
-   If that fails too, the problem is FFmpeg's TLS, not this plugin.
+   Expect this to fail with `Peer certificate failed verification`: FFmpeg
+   verifies by default and the console's certificate is self-signed. That is why
+   `play` passes `--demuxer-lavf-o=tls_verify=0 --rtsp-transport=tcp`. Add those
+   to reproduce what the plugin actually runs.
+
+   Qt Multimedia offers no equivalent knob, which is why in-panel playback falls
+   back to one-second stills against a self-signed console while mpv shows real
+   video. Verified on 7.2.105: the stream is HEVC 3840x2160 with AAC and Opus.
 3. **Fall back to plain RTSP.** Some firmware also exposes the same alias over
    unencrypted RTSP on port 7447. It avoids TLS entirely, at the cost of an
    unencrypted stream on your LAN. Rewrite the URL by hand to test:

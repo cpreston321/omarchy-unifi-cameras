@@ -101,9 +101,10 @@ Panel {
     return rows
   }
   // "connecting" while the URL is being fetched or the player is opening,
-  // "live" once frames arrive, "snapshots" when video is unavailable and the
-  // view is refreshing stills instead.
-  property string liveMode: "connecting"
+  // "live" once frames arrive, "snapshots" when stills are what is on screen.
+  // Stills are the resting state: live video only starts on a deliberate
+  // press, so anything else would claim a connection that was never attempted.
+  property string liveMode: "snapshots"
   property string liveDetail: ""
   property int detailFrame: 0
   property var shotAt: null
@@ -148,11 +149,14 @@ Panel {
 
   // Video failed, or was never available. Stills still tell you what the
   // camera sees, so the view degrades to them rather than to an error.
+  // Video failed, or was never available. The request to watch this camera
+  // stands — stills just refresh in video's place, a second apart — so
+  // wantLive is deliberately left set.
   function fallBackToSnapshots(reason) {
     if (root.liveMode === "live") return
-    root.wantLive = false
     root.liveMode = "snapshots"
     root.liveDetail = root.humanize(reason)
+    root.refreshSelected()
   }
 
   // The CLI prefixes every error with its own name, which belongs in a
@@ -347,7 +351,9 @@ Panel {
   // live it would be pure waste against the console.
   Timer {
     id: detailShotTimer
-    interval: 1500
+    // Live means as fast as the console will answer; otherwise this is just
+    // keeping the poster from going stale while the panel sits open.
+    interval: root.wantLive ? 1000 : 15000
     repeat: true
     running: root.opened && root.ready && root.liveMode !== "live"
       && root.selected !== null && root.selected.connected
@@ -685,15 +691,17 @@ Panel {
               Layout.preferredWidth: Style.space(6)
               Layout.preferredHeight: Style.space(6)
               radius: width / 2
-              color: root.liveMode === "live" ? Color.accent : "transparent"
-              border.width: root.liveMode === "live" ? 0 : 1
+              color: root.liveMode === "live" ? Color.accent
+                : (root.wantLive ? Color.urgent : "transparent")
+              border.width: root.liveMode === "live" || root.wantLive ? 0 : 1
               border.color: "#ffffff"
-              opacity: root.liveMode === "live" ? 1 : 0.6
+              opacity: root.liveMode === "live" || root.wantLive ? 1 : 0.6
             }
 
             Label {
               text: root.liveMode === "live" ? "Live"
-                : (root.liveMode === "connecting" ? "Connecting…" : "Snapshot · " + root.shotAge)
+                : (root.liveMode === "connecting" ? "Connecting…"
+                  : (root.wantLive ? "Live · stills" : "Snapshot · " + root.shotAge))
               color: "#ffffff"
               font.family: root.contentFontFamily
               font.pixelSize: Style.font.caption

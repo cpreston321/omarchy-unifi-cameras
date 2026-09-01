@@ -8,8 +8,10 @@ added to Omarchy.
 
 > **Status: `0.1.0`, verified against UniFi Protect 7.2.105.** Setup, camera
 > listing, snapshots, and the panel are confirmed working on real hardware.
-> Live video depends on RTSP being enabled per camera in the Protect app — see
-> [Live video](#live-video). PTZ is still unverified for lack of a PTZ camera.
+> Live video is confirmed working through mpv (HEVC 4K over RTSPS) once RTSP is
+> enabled per camera in the Protect app — see [Live video](#live-video). PTZ is
+> still unverified for lack of a PTZ camera, and the integration API exposes no
+> events collection on this firmware.
 > [docs/verifying-against-hardware.md](docs/verifying-against-hardware.md)
 > records what each endpoint actually returned.
 
@@ -58,7 +60,6 @@ unifi-protect cameras              # id, state, name
 unifi-protect play <id> [quality]  # live view in mpv
 unifi-protect snapshot <id>        # JPEG into the cache
 unifi-protect export <id>          # JPEG into ~/Pictures/UniFi/
-unifi-protect events [minutes]     # recent motion, rings, smart detections
 unifi-protect ptz-goto <id> <slot> # PTZ preset
 unifi-protect probe /cameras       # raw API response
 ```
@@ -89,10 +90,14 @@ carries a per-camera alias that grants access — so it reaches both mpv and the
 in-panel player without ever passing through a command line another user could
 read.
 
-Clicking a camera opens it in the panel: live video where RTSP is on, stills
-otherwise, with buttons to save a snapshot or hand the stream to mpv. In-panel
-video needs `qt6-multimedia`; without it the view falls back to stills and the
-rest of the plugin is unaffected.
+**Live Video** shows the camera in the panel: full-motion RTSPS where the
+system can decode it, and one-second stills where it cannot, labelled so you
+always know which you are looking at. **Open in mpv** is the reliable path to
+real video — FFmpeg verifies peer certificates by default and a UniFi console
+serves a self-signed one, so mpv is launched with verification off for the
+stream while the HTTP API keeps its certificate pin, which is where credentials
+actually travel. In-panel video additionally needs `qt6-multimedia`; without it
+the stage falls back to stills and nothing else is affected.
 
 ## Storage
 
