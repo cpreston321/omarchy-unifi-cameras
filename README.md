@@ -1,19 +1,21 @@
 # UniFi Cameras for Omarchy
 
-A local-first Omarchy plugin for UniFi Protect. Snapshots and live view for
-every camera on your console, from the bar — using Protect's
-official local integration API, an API key stored in the Secret Service, and a
-pinned certificate. No Ubiquiti account, no cloud round-trip, no camera daemon
-added to Omarchy.
+A local-first Omarchy plugin for UniFi Protect: live view, snapshots, and
+camera settings from the bar. It uses Protect's official local integration API,
+an API key held in the Secret Service, and a pinned certificate. No Ubiquiti
+account, no cloud round-trip, no camera daemon added to Omarchy. Setup happens
+in the panel — there is no terminal step.
 
 ![The UniFi Cameras panel](preview.png)
 
 > **Status: `0.1.0`, verified against UniFi Protect 7.2.105.** Setup, camera
 > listing, snapshots, and the panel are confirmed working on real hardware.
-> Live video is confirmed working through mpv (HEVC 4K over RTSPS) once RTSP is
-> enabled per camera in the Protect app — see [Live video](#live-video). PTZ is
-> still unverified for lack of a PTZ camera, and the integration API exposes no
-> events collection on this firmware.
+> Live video is confirmed working, both in the panel and through mpv, once RTSP
+> is enabled per camera in the Protect app — see [Live video](#live-video). The
+> PTZ routes are confirmed to exist (the console rejects them by saying the
+> camera is not a PTZ, rather than by 404) but are untested for lack of a PTZ
+> camera, and the integration API exposes no events collection on this
+> firmware.
 > [docs/verifying-against-hardware.md](docs/verifying-against-hardware.md)
 > records what each endpoint actually returned.
 
@@ -73,21 +75,31 @@ The panel's title carries your console's own logo, fetched from it on first
 refresh and cached — the mark is Ubiquiti's, so it is pulled from the hardware
 you own rather than shipped with the plugin.
 
-**From the bar.** Click the camera icon for a grid of snapshots, refreshed
-every 30 seconds while the panel is open. Click a camera to watch it in mpv;
-right-click to save a still into `~/Pictures/UniFi/<date>/`.
+**From the bar.** Click the camera icon. The panel shows one camera at a time:
+its name is a button carrying a status dot — accent when the camera is online —
+and clicking it opens a menu of every camera, each with its own dot, so you can
+see what is up before switching. With a single camera the button keeps the name
+and the status and stops being pressable.
 
-**From a terminal.**
+Below it, the picture: a snapshot that refreshes while the panel is open, or
+live video once you press **Live Video**. The badge on the frame says which you
+are looking at rather than assuming. The control in the top-right corner hands
+the full-resolution stream to mpv. **Save Photo** writes a still to
+`~/Pictures/UniFi/<date>/`.
+
+**From a terminal.** Every panel action has a command behind it:
 
 ```
-unifi-protect cameras              # id, state, name
-unifi-protect play <id> [quality]  # live view in mpv
-unifi-protect snapshot <id>        # JPEG into the cache
-unifi-protect export <id>          # JPEG into ~/Pictures/UniFi/
-unifi-protect ptz-goto <id> <slot> # PTZ preset
-unifi-protect scan                 # find consoles on this network
-unifi-protect logo                 # re-cache the console logo
-unifi-protect probe /cameras       # raw API response
+unifi-protect scan                     # find consoles on this network
+unifi-protect pin <host>               # save a console and pin its certificate
+unifi-protect key-set                  # store an API key, read from stdin
+unifi-protect cameras                  # id, state, name
+unifi-protect play <id> [quality]      # live view in mpv
+unifi-protect export <id>              # still into ~/Pictures/UniFi/
+unifi-protect toggle <id> <key> on|off # led, osd-date, detect-person, …
+unifi-protect ptz-goto <id> <slot>     # PTZ preset
+unifi-protect probe /cameras           # raw API response
+unifi-protect forget                   # remove key, config, and cache
 ```
 
 `unifi-protect` with no arguments lists everything.
@@ -163,10 +175,18 @@ to one-second stills, says so, and nothing else is affected.
 
 ## Security
 
-Short version: the key never appears in argv or the environment, transport trust
-is a public-key pin rather than a disabled certificate check, and the plugin
-makes no outbound connection other than to your console. The details, including
-what this design does *not* protect against, are in [SECURITY.md](SECURITY.md).
+Short version: the API key never appears in argv or the environment, a
+certificate pin is required rather than optional, and everything the console
+sends — camera ids, names, snapshots — is validated before it reaches a path, a
+request, or the screen.
+
+The plugin talks to your console and to nothing else on the internet. It does
+reach other hosts on your LAN in exactly two places, both local and both
+deliberate: setup's console scan, and the loopback relay that carries live
+video into the panel. Both are described below and in
+[SECURITY.md](SECURITY.md), along with what this design does *not* protect
+against — including one gap left open, in how config and cache paths are
+opened.
 
 ## Tests
 
@@ -174,10 +194,17 @@ what this design does *not* protect against, are in [SECURITY.md](SECURITY.md).
 ./tests/run-tests.sh
 ```
 
-Fully offline: manifest validation, API-key format guards, the settings the
-integration API accepts, CLI error paths, `qmllint`, and shell syntax. Nothing
-here talks to a console; hardware behaviour is recorded in
+Fully offline and sandboxed: the suite points `XDG_CONFIG_HOME` and
+`XDG_CACHE_HOME` at a temporary directory, because some of what it exercises
+deletes things. It covers manifest validation, the certificate-pin and
+camera-id guards, snapshot validation, the settings the integration API
+accepts, CLI error paths, `qmllint`, that every `root.` reference in the panel
+resolves, and shell syntax.
+
+Nothing here talks to a console; hardware behaviour is recorded in
 [docs/verifying-against-hardware.md](docs/verifying-against-hardware.md).
+Some checks skip without `shellcheck`, `qmllint`, or a Secret Service, and say
+so rather than passing quietly.
 
 ## Credit
 
