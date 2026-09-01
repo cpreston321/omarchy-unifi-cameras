@@ -251,8 +251,19 @@ check $? "the stream is pulled over TCP rather than UDP"
 ! grep -q "failed.connect(function(message) { root.fallBackToSnapshots(message)" Panel.qml
 check $? "the panel does not relay Qt's misleading player error"
 
-grep -q "self-signed certificate" Panel.qml
-check $? "the video fallback names the real cause and the remedy"
+grep -q "Open in mpv" Panel.qml
+check $? "the video fallback names the remedy"
+
+# The relay holds an ffmpeg process and a listening socket; every exit from
+# live view has to take it down.
+grep -q "127.0.0.1" bin/unifi-protect
+check $? "the relay binds to loopback only"
+
+[[ $(grep -c "relayProcess.running = false" Panel.qml) -ge 3 ]]
+check $? "every path out of live view stops the relay"
+
+grep -q "sourceSize.width" Panel.qml
+check $? "snapshots are decoded at display size rather than scaled from 4K"
 
 grep -q "rtsp_disabled_message" bin/unifi-protect
 check $? "a disabled RTSP channel produces actionable guidance"

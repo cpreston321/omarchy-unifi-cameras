@@ -22,6 +22,7 @@ snapshot <id> [path]    Fetch a JPEG (defaults to the snapshot cache)
 refresh                 Refresh cached snapshots for every connected camera
 stream-url <id> [q]     Print the RTSPS URL for quality q (high|medium|low)
 play <id> [q]           Open the live stream in mpv
+relay <id> [q]          Remux the stream to loopback HTTP for the panel (foreground)
 ptz-goto <id> <slot>    Move a PTZ camera to a preset slot
 ptz-patrol <id> <slot>  Start a PTZ patrol
 ptz-stop <id>           Stop a PTZ patrol
@@ -259,6 +260,63 @@ cmd_play() {
 
 # ------------------------------------------------------------------ events
 
+# Local relay so the panel can show live video.
+#
+# FFmpeg verifies peer certificates by default and the console serves a
+# self-signed one; mpv can be told to skip that, but Qt Multimedia exposes no
+# such knob and fails with an unrelated-looking error. So ffmpeg does the TLS
+# and remuxes the stream — no re-encoding, so no meaningful CPU cost — into
+# plain MPEG-TS over HTTP on the loopback, which Qt opens without complaint.
+#
+# Runs in the foreground and prints the local URL once the socket is actually
+# accepting. The caller owns the lifetime: killing this kills the relay.
+cmd_relay() {
+  local id=${1-} quality=${2:-medium}
+  [[ -n $id ]] || die "usage: unifi-protect relay <id> [quality]"
+  require_tools ffmpeg ss
+
+  local url port
+  url="$(cmd_stream_url "$id" "$quality")"
+
+  port="$(pick_free_port)"
+  [[ -n $port ]] || die "no free loopback port for the relay"
+
+  # Bound to 127.0.0.1 so the stream never leaves this machine.
+  ffmpeg -nostdin -loglevel error \
+    -tls_verify 0 -rtsp_transport tcp -i "$url" \
+    -c copy -f mpegts -listen 1 "http://127.0.0.1:${port}" &
+  local ffmpeg_pid=$!
+
+  # shellcheck disable=SC2064
+  trap "kill $ffmpeg_pid 2>/dev/null || true" EXIT INT TERM
+
+  # The listening socket only appears after ffmpeg has opened the RTSP input,
+  # which takes a moment. Announcing the URL before then would hand the panel
+  # an address that refuses the connection.
+  local waited=0
+  while (( waited < 100 )); do
+    if ss -ltnH "sport = :${port}" 2>/dev/null | grep -q .; then
+      printf 'http://127.0.0.1:%s\n' "$port"
+      wait "$ffmpeg_pid"
+      return
+    fi
+    if ! kill -0 "$ffmpeg_pid" 2>/dev/null; then
+      die "the relay could not open the stream"
+    fi
+    sleep 0.1
+    waited=$((waited + 1))
+  done
+  die "the relay did not start listening in time"
+}
+
+pick_free_port() {
+  local port attempt
+  for attempt in $(seq 1 40); do
+    port=$(( 20000 + RANDOM % 20000 ))
+    ss -ltnH "sport = :${port}" 2>/dev/null | grep -q . || { printf '%s\n' "$port"; return; }
+  done
+}
+
 # ------------------------------------------------------------------ PTZ
 
 cmd_ptz_goto() {
@@ -309,6 +367,7 @@ main() {
     ptz-goto)    cmd_ptz_goto "$@" ;;
     ptz-patrol)  cmd_ptz_patrol "$@" ;;
     ptz-stop)    cmd_ptz_stop "$@" ;;
+    relay)       cmd_relay "$@" ;;
     probe)       cmd_probe "$@" ;;
     ""|-h|--help|help) usage ;;
     *)           usage >&2; exit 2 ;;

@@ -55,6 +55,9 @@ Panel {
   property int frame: 0
 
   readonly property string quality: String(setting("quality", "high"))
+  // The in-panel view is a few hundred pixels wide, so it defaults to the
+  // medium substream rather than making the console push 4K into a thumbnail.
+  readonly property string panelQuality: String(setting("panelQuality", "medium"))
   readonly property int refreshSeconds: Math.max(5, Number(setting("refreshSeconds", 30)))
 
   // ------------------------------------------------------------ live view
@@ -111,6 +114,7 @@ Panel {
 
   function selectCamera(camera) {
     if (!camera) return
+    if (root.wantLive) root.stopLive()
     root.selectedId = camera.id
     root.wantLive = false
     root.streamUrl = ""
@@ -135,15 +139,21 @@ Panel {
     root.wantLive = true
     root.liveMode = "connecting"
     root.liveDetail = ""
-    streamProcess.command = [root.cli, "stream-url", root.selected.id, root.quality]
-    streamProcess.running = true
+    root.streamUrl = ""
+    relayProcess.running = false
+    relayProcess.command = [root.cli, "relay", root.selected.id, root.panelQuality]
+    relayProcess.running = true
   }
 
+  // The relay holds an ffmpeg process and a listening socket, so it is stopped
+  // explicitly rather than left to time out whenever live view ends — leaving
+  // the panel, switching camera, or closing the popup.
   function stopLive() {
     root.wantLive = false
     root.streamUrl = ""
     root.liveMode = "snapshots"
     root.liveDetail = ""
+    relayProcess.running = false
     root.refreshSelected()
   }
 
@@ -158,8 +168,9 @@ Panel {
   function videoUnavailable() {
     if (root.liveMode === "live") return
     root.liveMode = "snapshots"
-    root.liveDetail = "In-panel video can't skip the console's self-signed certificate. "
-      + "Showing stills — use Open in mpv for full video."
+    root.liveDetail = "Live video could not be decoded here. Showing stills — "
+      + "use Open in mpv for full video."
+    relayProcess.running = false
     root.refreshSelected()
   }
 
@@ -167,6 +178,7 @@ Panel {
     if (root.liveMode === "live") return
     root.liveMode = "snapshots"
     root.liveDetail = root.humanize(reason)
+    relayProcess.running = false
     root.refreshSelected()
   }
 
@@ -308,19 +320,23 @@ Panel {
   property Process playProcess: Process {}
   property Process exportProcess: Process {}
 
-  property Process streamProcess: Process {
+  property Process relayProcess: Process {
     onExited: function(exitCode) {
       if (!root.wantLive) return
-      if (exitCode !== 0) {
-        root.fallBackToSnapshots(streamStderr.text)
-        return
-      }
-      var url = String(streamStdout.text || "").trim()
-      if (url === "") { root.fallBackToSnapshots("The console returned no stream URL."); return }
-      root.streamUrl = url
+      // A relay that dies while live view is wanted means no video; the
+      // request itself stands, so stills take over in its place.
+      root.fallBackToSnapshots(relayStderr.text)
     }
-    stdout: StdioCollector { id: streamStdout; waitForEnd: true }
-    stderr: StdioCollector { id: streamStderr; waitForEnd: true }
+    stdout: StdioCollector {
+      id: relayStdout
+      waitForEnd: false
+      onTextChanged: {
+        if (!root.wantLive) return
+        var line = String(relayStdout.text || "").trim().split("\n")[0]
+        if (line.indexOf("http://") === 0) root.streamUrl = line
+      }
+    }
+    stderr: StdioCollector { id: relayStderr; waitForEnd: true }
   }
 
   // Single-camera stills, polled faster than the grid while a detail view is
@@ -621,6 +637,14 @@ Panel {
           fillMode: Image.PreserveAspectCrop
           asynchronous: true
           cache: false
+          smooth: true
+          mipmap: true
+          // Decode straight to the size actually drawn. A 3840x2160 JPEG scaled
+          // down by the scene graph without mipmaps is what made this look
+          // pixelated; it also cost 33 MB of texture for a 460 px panel.
+          // 2x the drawn width covers HiDPI without depending on a Screen
+          // attachment, which a popup window does not reliably have.
+          sourceSize.width: Math.max(640, Math.round(stage.width * 2))
           source: stage.posterSource
           opacity: root.selected && root.selected.connected ? 1 : 0.35
 

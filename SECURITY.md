@@ -32,6 +32,15 @@ alias that is itself an access grant, so it reaches mpv through a stdin playlist
 mpv runs with `--no-config --load-scripts=no --terminal=no`, so a hostile stream
 cannot reach user scripts or a config the plugin did not choose.
 
+**The live-view relay is loopback-only and short-lived.** In-panel video cannot
+work directly: FFmpeg verifies peer certificates by default, the console serves
+a self-signed one, and Qt Multimedia exposes no way to skip that. So `relay`
+has ffmpeg do the TLS and remux the stream — no re-encoding — to MPEG-TS over
+HTTP bound to `127.0.0.1` on a random high port. While it runs, any process on
+this machine can read that stream; it is started only on an explicit press and
+torn down when live view ends, the camera changes, or the panel closes. The
+RTSPS URL itself never reaches a command line, and no credential is involved.
+
 **Ids from the console are constrained before use.** Camera ids are used to build
 cache filenames and argument arrays, so the Omalaunch provider requires them to
 match `^[A-Za-z0-9]{4,64}$` and drops anything else — a name like `../../etc/passwd`

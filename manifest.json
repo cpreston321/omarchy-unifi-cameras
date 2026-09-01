@@ -21,7 +21,8 @@
     "allowMultiple": false,
     "defaults": {
       "quality": "high",
-      "refreshSeconds": 30
+      "refreshSeconds": 30,
+      "panelQuality": "medium"
     },
     "schema": [
       {
@@ -33,6 +34,11 @@
         "key": "refreshSeconds",
         "type": "number",
         "label": "Snapshot refresh interval (seconds)"
+      },
+      {
+        "key": "panelQuality",
+        "type": "string",
+        "label": "In-panel live stream quality (high, medium, low)"
       }
     ]
   },
