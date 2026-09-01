@@ -14,6 +14,7 @@ usage: unifi-protect <command> [args]
 
 setup [host] [port]     Find or pin a console, store an API key (stdin), verify
 scan                    Find UniFi Protect consoles on this network
+pin <host> [port]       Pin a console and save it, without prompting
 logo                    Cache the console's own logo for the panel
 key-set                 Replace the stored API key, read from stdin
 forget                  Remove the stored key and config
@@ -166,6 +167,21 @@ cmd_setup() {
 
   cmd_check
   cmd_logo >/dev/null 2>&1 || true
+}
+
+# Pin a console and write its config, with no prompting. This is what the
+# panel calls once someone has picked an address: setup has to be completable
+# without a terminal, so nothing here may wait on a tty.
+cmd_pin() {
+  local host=${1-} port=${2:-443}
+  [[ -n $host ]] || die "usage: unifi-protect pin <host> [port]"
+  [[ $host =~ ^[A-Za-z0-9._-]+$ ]] || die "invalid host"
+  [[ $port =~ ^[0-9]+$ ]] || die "port must be numeric"
+  require_tools curl jq openssl
+  local pin
+  pin="$(fetch_pin "$host" "$port")"
+  config_write "$host" "$port" "$pin"
+  printf '%s\n' "$pin"
 }
 
 cmd_key_set() {
@@ -542,6 +558,7 @@ main() {
   case $cmd in
     setup)       cmd_setup "$@" ;;
     scan)        cmd_scan "$@" ;;
+    pin)         cmd_pin "$@" ;;
     logo)        cmd_logo "$@" ;;
     key-set)     cmd_key_set "$@" ;;
     forget)      cmd_forget "$@" ;;

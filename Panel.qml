@@ -128,6 +128,41 @@ Panel {
 
   property bool settingsOpen: false
 
+  // ------------------------------------------------------------ in-panel setup
+  //
+  // Setup runs here rather than in a terminal. The API key reaches the CLI
+  // through the process's stdin, so it is never an argument, never in the
+  // environment, and never written to a file on the way.
+  property string setupPhase: ""      // "", "scanning", "choose", "saving"
+  property var scanResults: []
+  property string setupError: ""
+
+  function startScan() {
+    root.setupPhase = "scanning"
+    root.setupError = ""
+    root.scanResults = []
+    scanProcess.command = [root.cli, "scan"]
+    scanProcess.running = true
+  }
+
+  function useHost(host) {
+    if (!host) return
+    root.setupPhase = "saving"
+    root.setupError = ""
+    pinProcess.command = [root.cli, "pin", String(host)]
+    pinProcess.running = true
+  }
+
+  function saveKey(key) {
+    if (!key) return
+    root.setupPhase = "saving"
+    root.setupError = ""
+    keyProcess.running = true
+    // Written, then the writer is closed so `read` sees EOF rather than
+    // blocking. The field is cleared by the caller the moment this returns.
+    keyProcess.write(key + "\n")
+  }
+
   // Rows are derived from the camera the console reports, so the switches show
   // what is actually set rather than what was last pressed.
   readonly property var settingRows: {
@@ -232,19 +267,18 @@ Panel {
   // previously offered "Connect a console…" when a console was already
   // connected and only the key was missing.
   readonly property var emptyStates: ({
-    "loading":     { title: "Checking…",              body: "",  action: "",                 command: [] },
-    "no-console":  { title: "No console connected",   body: "Connect a UniFi Protect console to see your cameras.",
-                     action: "Connect a console…",    command: ["setup"] },
-    "bad-config":  { title: "Console settings unreadable", body: "The saved settings could not be read. Reconnecting rewrites them.",
-                     action: "Reconnect…",            command: ["setup"] },
-    "no-key":      { title: "API key needed",         body: "Create an API key on the console under Control Plane → Integrations, then add it here.",
-                     action: "Add API key…",          command: ["key-set"] },
-    "bad-key":     { title: "Stored key looks wrong", body: "The key in your keyring is not in the format Protect issues.",
-                     action: "Replace key…",          command: ["key-set"] },
-    "unreachable": { title: "Can't reach the console", body: "The console did not answer. It may be rebooting, or the pinned certificate may have changed.",
-                     action: "Reconnect…",            command: ["setup"] },
-    "no-cameras":  { title: "No cameras",             body: "This console has no cameras adopted.",
-                     action: "",                      command: [] }
+    "loading":     { title: "Checking…",              body: "" },
+    "no-console":  { title: "No console connected",
+                     body: "Search this network for a UniFi Protect console, or enter its address." },
+    "bad-config":  { title: "Console settings unreadable",
+                     body: "The saved settings could not be read. Connecting again rewrites them." },
+    "no-key":      { title: "API key needed",
+                     body: "Create one on the console under Control Plane → Integrations, then paste it here." },
+    "bad-key":     { title: "Stored key looks wrong",
+                     body: "The key in your keyring is not in the format Protect issues. Paste a new one." },
+    "unreachable": { title: "Can't reach the console",
+                     body: "It did not answer. It may be rebooting, or its certificate may have changed." },
+    "no-cameras":  { title: "No cameras",             body: "This console has no cameras adopted." }
   })
 
   readonly property var emptyState: {
@@ -365,6 +399,43 @@ Panel {
     stderr: StdioCollector { id: refreshStderr; waitForEnd: true }
   }
 
+  property Process scanProcess: Process {
+    onExited: function(exitCode) {
+      var found = String(scanStdout.text || "").trim()
+      root.scanResults = found === "" ? [] : found.split("\n")
+      root.setupPhase = "choose"
+      if (exitCode !== 0) root.setupError = root.humanize(scanStderr.text)
+    }
+    stdout: StdioCollector { id: scanStdout; waitForEnd: true }
+    stderr: StdioCollector { id: scanStderr; waitForEnd: true }
+  }
+
+  property Process pinProcess: Process {
+    onExited: function(exitCode) {
+      root.setupPhase = ""
+      if (exitCode !== 0) {
+        root.setupError = root.humanize(pinStderr.text)
+        return
+      }
+      root.loadStatus()
+    }
+    stderr: StdioCollector { id: pinStderr; waitForEnd: true }
+  }
+
+  property Process keyProcess: Process {
+    command: [root.cli, "key-set"]
+    stdinEnabled: true
+    onExited: function(exitCode) {
+      root.setupPhase = ""
+      if (exitCode !== 0) {
+        root.setupError = root.humanize(keyStderr.text)
+        return
+      }
+      root.loadStatus()
+    }
+    stderr: StdioCollector { id: keyStderr; waitForEnd: true }
+  }
+
   property Process settingProcess: Process {
     onExited: function(exitCode) {
       root.pendingSetting = ""
@@ -408,16 +479,6 @@ Panel {
     }
   }
 
-  property Process setupProcess: Process {}
-  // Setup and key entry both need a terminal: they prompt, and one of them
-  // reads a secret that must not pass through the panel. The wrapper holds the
-  // window open afterwards, so the result is still there to read.
-  function runSetupAction(subcommand) {
-    if (!subcommand || subcommand.length === 0) return
-    setupProcess.command = ["omarchy-launch-terminal", root.localPath("bin/unifi-terminal")].concat(subcommand)
-    setupProcess.running = true
-    root.close()
-  }
 
   // ------------------------------------------------------------------ timers
 
@@ -547,13 +608,139 @@ Panel {
         opacity: 0.65
       }
 
+      // ---- console discovery -------------------------------------
+      //
+      // Everything setup needs happens here. Handing off to a terminal meant
+      // the widget could not finish its own first run.
+
       Button {
         Layout.alignment: Qt.AlignHCenter
         Layout.topMargin: Style.space(6)
-        visible: root.emptyState !== null && root.emptyState.action !== ""
+        visible: root.needsConsole && root.setupPhase === ""
         bordered: true
-        text: root.emptyState ? root.emptyState.action : ""
-        onClicked: root.runSetupAction(root.emptyState ? root.emptyState.command : [])
+        text: "Find my console"
+        onClicked: root.startScan()
+      }
+
+      Label {
+        Layout.fillWidth: true
+        Layout.topMargin: Style.space(6)
+        visible: root.setupPhase === "scanning"
+        textFormat: Text.PlainText
+        text: "Searching this network…"
+        horizontalAlignment: Text.AlignHCenter
+        color: root.contentForeground
+        font.family: root.contentFontFamily
+        font.pixelSize: Style.font.bodySmall
+        opacity: 0.6
+      }
+
+      ColumnLayout {
+        Layout.fillWidth: true
+        Layout.topMargin: Style.space(4)
+        spacing: Style.space(4)
+        visible: root.needsConsole && root.setupPhase === "choose"
+
+        Repeater {
+          model: root.scanResults
+
+          delegate: Button {
+            required property var modelData
+            Layout.fillWidth: true
+            bordered: true
+            text: String(modelData)
+            onClicked: root.useHost(modelData)
+          }
+        }
+
+        Label {
+          Layout.fillWidth: true
+          visible: root.scanResults.length === 0
+          textFormat: Text.PlainText
+          text: "No console answered. Enter its address below."
+          horizontalAlignment: Text.AlignHCenter
+          wrapMode: Text.WordWrap
+          color: root.contentForeground
+          font.family: root.contentFontFamily
+          font.pixelSize: Style.font.bodySmall
+          opacity: 0.6
+        }
+      }
+
+      // Always offered: a scan cannot reach a console on another subnet.
+      RowLayout {
+        Layout.fillWidth: true
+        Layout.topMargin: Style.space(4)
+        spacing: Style.space(6)
+        visible: root.needsConsole && root.setupPhase !== "scanning"
+
+        TextField {
+          id: hostField
+          Layout.fillWidth: true
+          placeholderText: "Console address"
+          onAccepted: root.useHost(text.trim())
+        }
+
+        Button {
+          bordered: true
+          text: "Connect"
+          enabled: hostField.text.trim() !== ""
+          onClicked: root.useHost(hostField.text.trim())
+        }
+      }
+
+      // ---- API key -------------------------------------------------
+
+      RowLayout {
+        Layout.fillWidth: true
+        Layout.topMargin: Style.space(6)
+        spacing: Style.space(6)
+        visible: root.needsKey && root.setupPhase !== "saving"
+
+        TextField {
+          id: keyField
+          Layout.fillWidth: true
+          password: true
+          placeholderText: "Paste the API key"
+          onAccepted: { root.saveKey(text); text = "" }
+        }
+
+        Button {
+          bordered: true
+          text: "Save"
+          enabled: keyField.text !== ""
+          // Cleared immediately: the field is the only place the key sits in
+          // this process, and it reaches the CLI over stdin.
+          onClicked: { root.saveKey(keyField.text); keyField.text = "" }
+        }
+      }
+
+      Label {
+        Layout.fillWidth: true
+        Layout.topMargin: Style.space(4)
+        visible: root.setupPhase === "saving"
+        textFormat: Text.PlainText
+        text: "Saving…"
+        horizontalAlignment: Text.AlignHCenter
+        color: root.contentForeground
+        font.family: root.contentFontFamily
+        font.pixelSize: Style.font.bodySmall
+        opacity: 0.6
+      }
+
+      Label {
+        Layout.fillWidth: true
+        Layout.topMargin: Style.space(4)
+        visible: root.setupError !== ""
+        textFormat: Text.PlainText
+        text: root.setupError
+        horizontalAlignment: Text.AlignHCenter
+        wrapMode: Text.WordWrap
+        maximumLineCount: 3
+        elide: Text.ElideRight
+        color: Color.urgent
+        font.family: root.contentFontFamily
+        font.pixelSize: Style.font.caption
       }
 
       // The console's own words, kept small and last. Useful when a

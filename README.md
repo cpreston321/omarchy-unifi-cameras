@@ -33,23 +33,20 @@ omarchy plugin add https://github.com/cpreston321/omarchy-unifi-cameras --enable
 ```
 
 Then create an API key on the console — **UniFi OS → Control Plane →
-Integrations → Create API Key** — and connect:
+Integrations → Create API Key** — and open the panel. Setup happens there:
 
-```bash
-~/.config/omarchy/plugins/quantumfire.unifi-cameras/bin/unifi-protect setup
-```
+1. **Find my console** searches this network and lists what it finds. It
+   identifies a console by asking the integration API for `/meta/info` without
+   a key, since only Protect answers that path with a 401. You can type an
+   address instead, which a console on another subnet will need.
+2. Picking one records its certificate fingerprint.
+3. Paste the API key. It goes to the CLI over the process's stdin, so it is
+   never a command-line argument, never in the environment, and never written
+   to a file on the way to the keyring.
 
-With no address, `setup` scans the network and offers what it finds, so you do
-not have to go looking for your console's IP. It identifies one by asking the
-integration API for `/meta/info` without a key: only Protect answers that path
-with a 401. Pass an address to skip the scan.
-
-It then reads the console's certificate, stores its public-key fingerprint,
-prompts for the API key, saves the key in the Secret Service, and verifies the
-connection. `unifi-protect scan` runs discovery on its own.
-
-The panel offers the same thing: **Connect a console…** opens a terminal on
-this, so setup never needs a path typed by hand.
+No terminal, and nothing to type by hand unless you want to. The same steps
+are available from a shell — `unifi-protect scan`, `pin <host>`, `key-set` —
+if you would rather script it.
 
 ## Removal
 

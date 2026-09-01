@@ -26,13 +26,13 @@ check() { if [[ $1 -eq 0 ]]; then ok "$2"; else no "$2"; fi; }
 
 # ---------------------------------------------------------------- syntax
 
-for script in lib/protect.sh bin/unifi-protect bin/unifi-terminal tests/run-tests.sh; do
+for script in lib/protect.sh bin/unifi-protect tests/run-tests.sh; do
   bash -n "$script" 2>/dev/null
   check $? "bash syntax: $script"
 done
 
 if command -v shellcheck >/dev/null 2>&1; then
-  shellcheck -S warning lib/protect.sh bin/unifi-protect bin/unifi-terminal >/dev/null 2>&1
+  shellcheck -S warning lib/protect.sh bin/unifi-protect >/dev/null 2>&1
   check $? "shellcheck is clean"
 else
   skipt "shellcheck not installed"
@@ -80,13 +80,26 @@ for entry in $(jq -r '.entryPoints[]' manifest.json); do
   check $? "entry point exists: $entry"
 done
 
-# The panel dispatches through the wrapper so a terminal action's output
-# survives the command finishing.
-[[ -x bin/unifi-terminal ]]
-check $? "the terminal wrapper is executable"
+# Setup has to be completable inside the widget: no terminal, no shell, and
+# the key never on a command line.
+! grep -q "omarchy-launch-terminal" Panel.qml
+check $? "the panel never hands setup off to a terminal"
 
-grep -q "bin/unifi-terminal" Panel.qml
-check $? "the panel opens terminals through the wrapper, not the CLI directly"
+grep -q "stdinEnabled: true" Panel.qml
+check $? "the API key reaches the CLI over stdin"
+
+! grep -q '"key-set", ' Panel.qml
+check $? "the key is never passed as a command argument"
+
+grep -q 'scanProcess.command = \[root.cli, "scan"\]' Panel.qml
+check $? "the panel can scan for a console itself"
+
+grep -q '"pin", String(host)' Panel.qml
+check $? "the panel can pin a console itself"
+
+# pin exists so setup never needs a tty; a prompt in it would defeat that.
+! sed -n '/^cmd_pin() {/,/^}/p' bin/unifi-protect | grep -q "read -r"
+check $? "pin never waits on a terminal"
 
 # ---------------------------------------------------------------- key format
 
