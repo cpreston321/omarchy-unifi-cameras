@@ -311,18 +311,28 @@ check $? "the model is still reported in the details list"
 grep -q "toggle_apply" bin/unifi-protect
 check $? "settings go through one place that names what is writable"
 
-! grep -q "isMicEnabled" Panel.qml
-check $? "the panel offers no toggle for a read-only field"
+! grep -qE 'key: "(mic|hdr|video|name)' Panel.qml
+check $? "no setting row is offered for a field the API will not accept"
+
+# Every key the panel can send has to be one the CLI handles, or the switch
+# fails silently against a console that never saw the request.
+for key in $(grep -oE 'key: "[a-z-]+"' Panel.qml | sed 's/key: "//;s/"//'); do
+  [[ $key == detect-* ]] && continue
+  grep -q "    ${key})" bin/unifi-protect
+  check $? "the CLI handles the '$key' key the panel sends"
+done
 
 for setting in led osd-name osd-date osd-logo; do
   grep -q "$setting)" bin/unifi-protect
   check $? "the CLI accepts the '$setting' setting"
 done
 
-./bin/unifi-protect toggle someid bogus on 2>&1 | grep -q "unknown setting"
+out="$(./bin/unifi-protect toggle someid bogus on 2>&1)"
+grep -q "unknown setting" <<<"$out"
 check $? "an unknown setting is refused before any request"
 
-./bin/unifi-protect toggle someid led maybe 2>&1 | grep -q "state must be on or off"
+out="$(./bin/unifi-protect toggle someid led maybe 2>&1)"
+grep -q "state must be on or off" <<<"$out"
 check $? "a non-boolean state is refused before any request"
 
 # objectTypes is replaced wholesale, so it is rebuilt from what the console
