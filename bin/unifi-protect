@@ -14,6 +14,7 @@ usage: unifi-protect <command> [args]
 
 setup [host] [port]     Find or pin a console, store an API key (stdin), verify
 scan                    Find UniFi Protect consoles on this network
+logo                    Cache the console's own logo for the panel
 key-set                 Replace the stored API key, read from stdin
 forget                  Remove the stored key and config
 check                   Verify connectivity and print console identity
@@ -163,6 +164,7 @@ cmd_setup() {
   unset key
 
   cmd_check
+  cmd_logo >/dev/null 2>&1 || true
 }
 
 cmd_key_set() {
@@ -243,6 +245,33 @@ cmd_status() {
     '{state: $state, host: $host, detail: $detail, configured: $configured, hasKey: $hasKey}'
 }
 
+# The console's own favicon, cached for the panel's title.
+#
+# Fetched from the user's hardware rather than shipped with the plugin: the
+# mark is Ubiquiti's, and pulling it from the console the user already owns
+# avoids redistributing it. Same host, so the certificate pin still applies.
+cmd_logo() {
+  config_load
+  require_tools curl
+  local out tmp
+  out="$(cache_dir)/logo.svg"
+  mkdir -p "$(cache_dir)"
+  tmp="$(mktemp "${out}.XXXXXX")"
+  # shellcheck disable=SC2064
+  trap "rm -f '$tmp'" RETURN
+
+  local -a args
+  mapfile -t args < <(curl_common)
+  args+=(--request GET --max-filesize 262144 --output "$tmp")
+  args+=("$(console_origin)/favicon.svg")
+
+  curl "${args[@]}" || die "could not fetch the console logo"
+  [[ -s $tmp ]] || die "the console returned an empty logo"
+  head -c 200 "$tmp" | grep -qi "<svg" || die "the console did not return an SVG"
+  mv "$tmp" "$out"
+  printf '%s\n' "$out"
+}
+
 # ------------------------------------------------------------------ cameras
 
 cameras_json() { api_request GET /cameras; }
@@ -273,6 +302,7 @@ cmd_refresh() {
   local dir id list tmp
   dir="$(snapshot_dir)"
   mkdir -p "$dir"
+  [[ -s "$(cache_dir)/logo.svg" ]] || cmd_logo >/dev/null 2>&1 || true
   # The Omalaunch provider runs under a five-second budget and must not touch
   # the network, so the camera list is cached here for it to read offline.
   list="$(cache_dir)/cameras.json"
@@ -468,6 +498,7 @@ main() {
   case $cmd in
     setup)       cmd_setup "$@" ;;
     scan)        cmd_scan "$@" ;;
+    logo)        cmd_logo "$@" ;;
     key-set)     cmd_key_set "$@" ;;
     forget)      cmd_forget "$@" ;;
     check)       cmd_check "$@" ;;

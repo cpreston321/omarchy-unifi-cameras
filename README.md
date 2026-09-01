@@ -51,6 +51,10 @@ pick **Connect a console…**, and press Enter to scan.
 
 ## Using it
 
+The panel's title carries your console's own logo, fetched from it on first
+refresh and cached — the mark is Ubiquiti's, so it is pulled from the hardware
+you own rather than shipped with the plugin.
+
 **From the bar.** Click the camera icon for a grid of snapshots, refreshed
 every 30 seconds while the panel is open. Click a camera to watch it in mpv;
 right-click to save a still into `~/Pictures/UniFi/<date>/`.
@@ -69,6 +73,7 @@ unifi-protect snapshot <id>        # JPEG into the cache
 unifi-protect export <id>          # JPEG into ~/Pictures/UniFi/
 unifi-protect ptz-goto <id> <slot> # PTZ preset
 unifi-protect scan                 # find consoles on this network
+unifi-protect logo                 # re-cache the console logo
 unifi-protect probe /cameras       # raw API response
 ```
 

@@ -36,6 +36,7 @@ Panel {
     return (xdg && xdg !== "") ? xdg : Quickshell.env("HOME") + "/.cache"
   }
   readonly property string snapshotDir: cacheHome + "/omarchy-unifi/snapshots"
+  readonly property string logoPath: cacheHome + "/omarchy-unifi/logo.svg"
 
   // ------------------------------------------------------------------ state
 
@@ -522,7 +523,23 @@ Panel {
       // Title block
       RowLayout {
         Layout.fillWidth: true
-        spacing: Style.space(8)
+        spacing: Style.space(9)
+
+        // The console's own favicon, cached by the CLI. Absent until the first
+        // refresh after this version, and on a console that does not serve
+        // one — so the row is built to look right without it.
+        Image {
+          Layout.preferredWidth: Style.space(24)
+          Layout.preferredHeight: Style.space(24)
+          Layout.alignment: Qt.AlignVCenter
+          visible: status === Image.Ready
+          source: "file://" + root.logoPath
+          sourceSize.width: Style.space(48)
+          sourceSize.height: Style.space(48)
+          fillMode: Image.PreserveAspectFit
+          asynchronous: true
+          smooth: true
+        }
 
         ColumnLayout {
           Layout.fillWidth: true
@@ -548,12 +565,6 @@ Panel {
             font.pixelSize: Style.font.bodySmall
             opacity: 0.5
           }
-        }
-
-        Button {
-          bordered: true
-          text: "Setup"
-          onClicked: root.runSetupAction(["setup"])
         }
       }
 

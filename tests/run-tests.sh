@@ -308,6 +308,22 @@ check $? "the launcher setup entry scans when submitted empty"
 grep -q "SCAN_MAX_HOSTS" bin/unifi-protect
 check $? "the scan is bounded"
 
+# The title-row Setup button was only ever visible once setup had succeeded —
+# every failure state replaces the whole view with its own action button.
+! grep -q 'text: "Setup"' Panel.qml
+check $? "no Setup button sits in the title once setup has succeeded"
+
+# The mark is Ubiquiti's; it comes from the console the user owns rather than
+# being redistributed in this repo.
+! ls assets/*.svg >/dev/null 2>&1
+check $? "no vendor logo is shipped in the repo"
+
+grep -q "favicon.svg" bin/unifi-protect
+check $? "the logo is fetched from the console"
+
+grep -q "status === Image.Ready" Panel.qml
+check $? "the title row renders correctly without a cached logo"
+
 # A single spacing value makes every gap equally important, so nothing groups.
 [[ $(grep -c "Layout.topMargin" Panel.qml) -ge 8 ]]
 check $? "vertical gaps are set per boundary rather than inherited"
