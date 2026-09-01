@@ -251,8 +251,24 @@ check $? "the stream is pulled over TCP rather than UDP"
 ! grep -q "failed.connect(function(message) { root.fallBackToSnapshots(message)" Panel.qml
 check $? "the panel does not relay Qt's misleading player error"
 
-grep -q "Open in mpv" Panel.qml
+grep -q "mpv" Panel.qml
 check $? "the video fallback names the remedy"
+
+# Handing the stream to mpv is an action on the video, so it lives on the
+# stage rather than duplicating a row button.
+! grep -q 'text: "Open in mpv"' Panel.qml
+check $? "the mpv row button is gone in favour of the stage control"
+
+grep -q "Open full video in mpv" Panel.qml
+check $? "the stage carries an expand control"
+
+# The header's refresh icon already takes a fresh snapshot.
+! grep -q 'text: "Refresh"' Panel.qml
+check $? "the redundant refresh button is gone"
+
+# The relay survives an orderly stop and a SIGKILL of either process.
+grep -q 'kill -0 "$self"' bin/unifi-protect
+check $? "the relay watchdog notices this script being killed"
 
 # The relay holds an ffmpeg process and a listening socket; every exit from
 # live view has to take it down.

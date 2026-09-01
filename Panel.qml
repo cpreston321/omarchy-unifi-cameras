@@ -706,6 +706,47 @@ Panel {
           opacity: 0.5
         }
 
+        // Handing the stream to mpv belongs on the video, not in the button
+        // grid: it is an action on what you are looking at, and reads as the
+        // fullscreen control every other player puts in this corner.
+        Rectangle {
+          anchors.right: parent.right
+          anchors.top: parent.top
+          anchors.margins: Style.space(8)
+          width: Style.space(28)
+          height: width
+          radius: Style.space(4)
+          visible: root.selected !== null && root.selected.connected
+          color: expandHover.hovered ? Qt.rgba(0, 0, 0, 0.85) : Qt.rgba(0, 0, 0, 0.55)
+          border.width: 1
+          border.color: expandHover.hovered ? Qt.rgba(1, 1, 1, 0.85) : Qt.rgba(1, 1, 1, 0.35)
+
+          Label {
+            anchors.centerIn: parent
+            text: "\uf065"
+            color: "#ffffff"
+            font.family: root.contentFontFamily
+            font.pixelSize: Style.font.bodySmall
+          }
+
+          HoverHandler {
+            id: expandHover
+            cursorShape: Qt.PointingHandCursor
+          }
+
+          TapHandler {
+            onSingleTapped: {
+              root.play(root.selected.id, root.quality)
+              root.close()
+            }
+          }
+
+          PanelToolTip {
+            visible: expandHover.hovered
+            text: "Open full video in mpv"
+          }
+        }
+
         // Says what is actually on screen, which is not always what was asked
         // for — a stream that never opened still shows stills.
         Rectangle {
@@ -765,7 +806,6 @@ Panel {
         Layout.fillWidth: true
         columns: 2
         columnSpacing: Style.space(8)
-        rowSpacing: Style.space(8)
         visible: root.selected !== null
 
         Button {
@@ -774,22 +814,6 @@ Panel {
           enabled: root.selected !== null && root.selected.connected
           text: root.wantLive ? "Stop Live" : "Live Video"
           onClicked: root.wantLive ? root.stopLive() : root.startLive()
-        }
-
-        Button {
-          Layout.fillWidth: true
-          bordered: true
-          enabled: root.selected !== null && root.selected.connected
-          text: "Open in mpv"
-          onClicked: { root.play(root.selected.id, root.quality); root.close() }
-        }
-
-        Button {
-          Layout.fillWidth: true
-          bordered: true
-          enabled: root.selected !== null && root.selected.connected
-          text: "Refresh Snapshot"
-          onClicked: root.refreshSelected()
         }
 
         Button {

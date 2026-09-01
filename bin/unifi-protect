@@ -290,6 +290,22 @@ cmd_relay() {
   # shellcheck disable=SC2064
   trap "kill $ffmpeg_pid 2>/dev/null || true" EXIT INT TERM
 
+  # The trap covers an orderly stop, but not SIGKILL. Two things can die that
+  # way: this script (Quickshell signals its direct child, and escalates to
+  # KILL when TERM is ignored) and the shell hosting the panel (which would
+  # leave this script orphaned but running). The watchdog outlives both, and
+  # ffmpeg holds a port and a camera substream until something reaps it.
+  local self=$$ parent=$PPID
+  (
+    while kill -0 "$ffmpeg_pid" 2>/dev/null \
+      && kill -0 "$self" 2>/dev/null \
+      && kill -0 "$parent" 2>/dev/null; do
+      sleep 1
+    done
+    kill "$ffmpeg_pid" 2>/dev/null || true
+  ) &
+  disown
+
   # The listening socket only appears after ffmpeg has opened the RTSP input,
   # which takes a moment. Announcing the URL before then would hand the panel
   # an address that refuses the connection.

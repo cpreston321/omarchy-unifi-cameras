@@ -18,8 +18,8 @@ added to Omarchy.
 ## Requirements
 
 Everything is stock on Omarchy: `curl`, `jq`, `openssl`, `secret-tool` (GNOME
-Keyring), `mpv`, `python3`. `qt6-multimedia` is optional and only adds in-panel
-video; the plugin works without it.
+Keyring), `mpv`, `python3`, `ffmpeg`. `qt6-multimedia` is optional and only adds
+in-panel video; the plugin works without it.
 
 On the console side you need **UniFi Protect 5.3 or newer** on UniFi OS, which
 is where the local integration API and API keys landed.
@@ -72,7 +72,8 @@ Set on the bar entry in `~/.config/omarchy/shell.json`:
 
 | Key              | Default | Meaning                                  |
 |------------------|---------|------------------------------------------|
-| `quality`        | `high`  | Stream quality for click-to-watch        |
+| `quality`        | `high`  | Stream quality handed to mpv             |
+| `panelQuality`   | `medium`| Stream quality for in-panel live video    |
 | `refreshSeconds` | `30`    | Snapshot refresh interval while open     |
 
 ## Live video
@@ -90,14 +91,21 @@ carries a per-camera alias that grants access — so it reaches both mpv and the
 in-panel player without ever passing through a command line another user could
 read.
 
-**Live Video** shows the camera in the panel: full-motion RTSPS where the
-system can decode it, and one-second stills where it cannot, labelled so you
-always know which you are looking at. **Open in mpv** is the reliable path to
-real video — FFmpeg verifies peer certificates by default and a UniFi console
-serves a self-signed one, so mpv is launched with verification off for the
-stream while the HTTP API keeps its certificate pin, which is where credentials
-actually travel. In-panel video additionally needs `qt6-multimedia`; without it
-the stage falls back to stills and nothing else is affected.
+**Live Video** plays the camera in the panel, and the **expand control** in the
+top-right of the picture hands the full-resolution stream to mpv.
+
+Getting video into the panel takes one indirection. FFmpeg verifies peer
+certificates by default, a UniFi console serves a self-signed one, and Qt
+Multimedia offers no way to skip that — so `unifi-protect relay` has ffmpeg do
+the TLS and remux the stream (copy, not re-encode) to MPEG-TS over HTTP bound
+to `127.0.0.1`. The panel starts it on a press and stops it whenever live view
+ends. The HTTP API keeps its certificate pin throughout, which is where
+credentials actually travel.
+
+The panel uses the medium substream by default rather than making the console
+push 4K into a few hundred pixels; mpv gets the configured `quality`. In-panel
+video needs `ffmpeg` and `qt6-multimedia`; without either, the stage falls back
+to one-second stills, says so, and nothing else is affected.
 
 ## Storage
 
