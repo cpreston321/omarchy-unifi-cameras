@@ -324,12 +324,13 @@ Panel {
           var flags = entry.featureFlags || {}
           rows.push({
             id: String(entry.id),
-            name: String(entry.name || "Camera"),
+            name: String(entry.name || "Camera").substring(0, 64),
             connected: String(entry.state || "") === "CONNECTED",
-            model: String(entry.type || "Camera"),
+            model: String(entry.type || "Camera").substring(0, 64),
             mic: entry.isMicEnabled === true,
             hdr: String(entry.hdrType || ""),
-            smart: smart.join(", "),
+            smart: smart.map(function(kind) { return String(kind).substring(0, 32) })
+              .slice(0, 16).join(", "),
             osdName: osd.isNameEnabled === true,
             osdDate: osd.isDateEnabled === true,
             osdLogo: osd.isLogoEnabled === true,
@@ -507,6 +508,8 @@ Panel {
       spacing: Style.space(8)
 
       Label {
+
+        textFormat: Text.PlainText
         Layout.alignment: Qt.AlignHCenter
         text: "\udb81\udfae"
         font.family: root.contentFontFamily
@@ -516,6 +519,8 @@ Panel {
       }
 
       Label {
+
+        textFormat: Text.PlainText
         Layout.fillWidth: true
         Layout.topMargin: Style.space(4)
         text: root.emptyState ? root.emptyState.title : ""
@@ -528,6 +533,8 @@ Panel {
       }
 
       Label {
+
+        textFormat: Text.PlainText
         Layout.fillWidth: true
         visible: text !== ""
         text: root.emptyState ? root.emptyState.body : ""
@@ -553,6 +560,7 @@ Panel {
       // certificate pin or a network fault is the real cause, but never the
       // headline — that is what the sentences above are for.
       Label {
+        textFormat: Text.PlainText
         Layout.fillWidth: true
         Layout.topMargin: Style.space(4)
         visible: root.setupState === "unreachable" && root.detail !== ""
@@ -624,6 +632,8 @@ Panel {
           spacing: 0
 
           Label {
+
+            textFormat: Text.PlainText
             Layout.fillWidth: true
             Layout.preferredHeight: Math.round(Style.font.title * 1.15)
             text: "UNIFI CAMERAS"
@@ -636,6 +646,8 @@ Panel {
           }
 
           Label {
+
+            textFormat: Text.PlainText
             Layout.fillWidth: true
             Layout.preferredHeight: Math.round(Style.font.caption * 1.25)
             text: root.cameras.length === 0
@@ -694,6 +706,8 @@ Panel {
               }
 
               Label {
+
+                textFormat: Text.PlainText
                 text: root.selected ? root.selected.name : ""
                 elide: Text.ElideRight
                 color: root.contentForeground
@@ -703,6 +717,8 @@ Panel {
               }
 
               Label {
+
+                textFormat: Text.PlainText
                 visible: cameraButton.interactive
                 text: "\udb80\udd40"
                 color: root.contentForeground
@@ -766,6 +782,8 @@ Panel {
                       }
 
                       Label {
+
+                        textFormat: Text.PlainText
                         Layout.fillWidth: true
                         text: modelData.name
                         elide: Text.ElideRight
@@ -885,6 +903,8 @@ Panel {
         }
 
         Label {
+
+          textFormat: Text.PlainText
           anchors.centerIn: parent
           visible: poster.status !== Image.Ready && !(playerLoader.item && playerLoader.item.playing)
           text: root.liveMode === "connecting" ? "Connecting…" : "No picture"
@@ -910,6 +930,8 @@ Panel {
           border.color: expandHover.hovered ? Qt.rgba(1, 1, 1, 0.85) : Qt.rgba(1, 1, 1, 0.35)
 
           Label {
+
+            textFormat: Text.PlainText
             anchors.centerIn: parent
             text: "\uf065"
             color: "#ffffff"
@@ -964,6 +986,8 @@ Panel {
             }
 
             Label {
+
+              textFormat: Text.PlainText
               text: root.liveMode === "live" ? "Live"
                 : (root.liveMode === "connecting" ? "Connecting…"
                   : (root.wantLive ? "Live · stills"
@@ -977,6 +1001,8 @@ Panel {
       }
 
       Label {
+
+        textFormat: Text.PlainText
         Layout.fillWidth: true
         Layout.topMargin: Style.space(7)
         visible: root.liveMode === "snapshots" && root.liveDetail !== ""
@@ -1033,6 +1059,8 @@ Panel {
         spacing: Style.space(8)
 
         Label {
+
+          textFormat: Text.PlainText
           Layout.fillWidth: true
           text: "CAMERA DETAILS"
           color: root.contentForeground
@@ -1047,6 +1075,7 @@ Panel {
         // heading used to be replaced by the toast, which meant the section
         // lost its label for as long as the message showed.
         Label {
+          textFormat: Text.PlainText
           visible: root.toast !== ""
           text: root.toast
           color: root.contentForeground
@@ -1070,6 +1099,8 @@ Panel {
             spacing: Style.space(10)
 
             Label {
+
+              textFormat: Text.PlainText
               text: modelData.label
               color: root.contentForeground
               font.family: root.contentFontFamily
@@ -1078,6 +1109,8 @@ Panel {
             }
 
             Label {
+
+              textFormat: Text.PlainText
               Layout.fillWidth: true
               text: modelData.value
               elide: Text.ElideRight
@@ -1109,6 +1142,8 @@ Panel {
           spacing: Style.space(6)
 
           Label {
+
+            textFormat: Text.PlainText
             Layout.fillWidth: true
             text: "SETTINGS"
             color: root.contentForeground
@@ -1120,6 +1155,8 @@ Panel {
           }
 
           Label {
+
+            textFormat: Text.PlainText
             text: root.settingsOpen ? "\udb80\udd43" : "\udb80\udd40"
             color: root.contentForeground
             font.family: root.contentFontFamily
@@ -1154,6 +1191,8 @@ Panel {
             spacing: Style.space(10)
 
             Label {
+
+              textFormat: Text.PlainText
               Layout.fillWidth: true
               text: modelData.label
               elide: Text.ElideRight

@@ -291,8 +291,8 @@ camera_name() {
 }
 
 cmd_snapshot() {
-  local id=${1-} out=${2-}
-  [[ -n $id ]] || die "usage: unifi-protect snapshot <id> [path]"
+  local id out=${2-}
+  id="$(checked_camera_id "${1-}")"
   [[ -n $out ]] || out="$(snapshot_dir)/${id}.jpg"
   api_snapshot "$id" "$out"
 }
@@ -305,15 +305,15 @@ cmd_refresh() {
   mkdir -p "$dir"
   [[ -s "$(cache_dir)/logo.svg" ]] || cmd_logo >/dev/null 2>&1 || true
   while IFS= read -r id; do
-    [[ -n $id ]] || continue
+    camera_id_valid "$id" || continue
     api_snapshot "$id" "$dir/${id}.jpg" >/dev/null 2>&1 || true
   done < <(cameras_json | jq -r '.[] | select((.state // "") == "CONNECTED") | .id')
   printf '%s\n' "$dir"
 }
 
 cmd_export() {
-  local id=${1-}
-  [[ -n $id ]] || die "usage: unifi-protect export <id>"
+  local id
+  id="$(checked_camera_id "${1-}")"
   local base name stamp out
   base="$( (xdg-user-dir PICTURES 2>/dev/null) || printf '%s/Pictures' "$HOME")"
   name="$(camera_name "$id" | tr -cd '[:alnum:]._- ' | tr ' ' '-')"
@@ -357,8 +357,9 @@ toggle_apply() {
 }
 
 cmd_toggle() {
-  local id=${1-} setting=${2-} state=${3-}
-  [[ -n $id && -n $setting && -n $state ]] \
+  local id setting=${2-} state=${3-}
+  id="$(checked_camera_id "${1-}")"
+  [[ -n $setting && -n $state ]] \
     || die "usage: unifi-protect toggle <id> <setting> <on|off>"
   local enabled
   case $state in
@@ -394,8 +395,8 @@ stream_url_any() {
 # Protect ships with RTSP off and "no stream" is a setup state rather than a
 # failure. Callers get a URL or an error, never a silent empty line.
 cmd_stream_url() {
-  local id=${1-} quality=${2:-high}
-  [[ -n $id ]] || die "usage: unifi-protect stream-url <id> [quality]"
+  local id quality=${2:-high}
+  id="$(checked_camera_id "${1-}")"
   local url
   url="$(stream_url_any "$id" "$quality")"
   [[ -n $url ]] || die "$(rtsp_disabled_message)"
@@ -405,8 +406,8 @@ cmd_stream_url() {
 # The URL carries a per-channel alias that grants stream access, so it goes to
 # mpv through a stdin playlist rather than argv.
 cmd_play() {
-  local id=${1-} quality=${2:-high}
-  [[ -n $id ]] || die "usage: unifi-protect play <id> [quality]"
+  local id quality=${2:-high}
+  id="$(checked_camera_id "${1-}")"
   require_tools mpv
   local url title
   url="$(cmd_stream_url "$id" "$quality")"
@@ -437,8 +438,8 @@ cmd_play() {
 # Runs in the foreground and prints the local URL once the socket is actually
 # accepting. The caller owns the lifetime: killing this kills the relay.
 cmd_relay() {
-  local id=${1-} quality=${2:-medium}
-  [[ -n $id ]] || die "usage: unifi-protect relay <id> [quality]"
+  local id quality=${2:-medium}
+  id="$(checked_camera_id "${1-}")"
   require_tools ffmpeg ss
 
   local url port
@@ -504,20 +505,22 @@ pick_free_port() {
 # ------------------------------------------------------------------ PTZ
 
 cmd_ptz_goto() {
-  local id=${1-} slot=${2-}
-  [[ -n $id && $slot =~ ^-?[0-9]+$ ]] || die "usage: unifi-protect ptz-goto <id> <slot>"
+  local id slot=${2-}
+  id="$(checked_camera_id "${1-}")"
+  [[ $slot =~ ^-?[0-9]+$ ]] || die "usage: unifi-protect ptz-goto <id> <slot>"
   api_request POST "/cameras/${id}/ptz/goto/${slot}" >/dev/null
 }
 
 cmd_ptz_patrol() {
-  local id=${1-} slot=${2-}
-  [[ -n $id && $slot =~ ^[0-9]+$ ]] || die "usage: unifi-protect ptz-patrol <id> <slot>"
+  local id slot=${2-}
+  id="$(checked_camera_id "${1-}")"
+  [[ $slot =~ ^[0-9]+$ ]] || die "usage: unifi-protect ptz-patrol <id> <slot>"
   api_request POST "/cameras/${id}/ptz/patrol/start/${slot}" >/dev/null
 }
 
 cmd_ptz_stop() {
-  local id=${1-}
-  [[ -n $id ]] || die "usage: unifi-protect ptz-stop <id>"
+  local id
+  id="$(checked_camera_id "${1-}")"
   api_request POST "/cameras/${id}/ptz/patrol/stop" >/dev/null
 }
 

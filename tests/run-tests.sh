@@ -140,7 +140,7 @@ check $? "forget succeeds without a usable config"
 #
 # Gated on secret-tool: without it the CLI stops earlier, at the missing
 # dependency, and these would pass for the wrong reason rather than fail.
-printf '{"console":{"host":"198.51.100.1","port":443,"pin":""}}' > "$CFG/omarchy-unifi/config.json"
+printf '{"console":{"host":"198.51.100.1","port":443,"pin":"sha256//AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="}}' > "$CFG/omarchy-unifi/config.json"
 if command -v secret-tool >/dev/null 2>&1; then
   out="$(XDG_CONFIG_HOME="$CFG" ./bin/unifi-protect check 2>&1)"
   [[ $(wc -l <<<"$out") -eq 1 ]]
@@ -161,7 +161,7 @@ st="$(XDG_CONFIG_HOME="$TMP/nothing" ./bin/unifi-protect status)"
 [[ $? -eq 0 ]] && jq -e '.state == "no-console" and .configured == false' <<<"$st" >/dev/null
 check $? "status reports no-console without a config"
 
-printf '{"console":{"host":"198.51.100.1","port":443,"pin":""}}' > "$CFG/omarchy-unifi/config.json"
+printf '{"console":{"host":"198.51.100.1","port":443,"pin":"sha256//AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="}}' > "$CFG/omarchy-unifi/config.json"
 st="$(XDG_CONFIG_HOME="$CFG" ./bin/unifi-protect status)"
 jq -e '.state == "no-key" and .configured == true and .hasKey == false and .host == "198.51.100.1"' <<<"$st" >/dev/null
 check $? "status distinguishes a configured console with no key"
@@ -382,6 +382,85 @@ check $? "a disabled RTSP channel produces actionable guidance"
 
 ! grep -q 'isPtz\|canOpticalZoom' bin/unifi-protect
 check $? "nothing reads featureFlags keys Protect does not send"
+
+# ---------------------------------------------------------- security baseline
+#
+# Each of these pins a finding from the marketplace security review. They are
+# the checks whose absence was not visible until someone looked.
+
+# The pin is the only thing authenticating a console, because every request
+# runs with --insecure against a self-signed certificate. No pin must mean no
+# connection, not an unauthenticated one.
+printf '{"console":{"host":"198.51.100.1","port":443,"pin":""}}' > "$CFG/omarchy-unifi/config.json"
+out="$(XDG_CONFIG_HOME="$CFG" ./bin/unifi-protect check 2>&1)"
+grep -q "no usable certificate pin" <<<"$out"
+check $? "a config without a pin is refused rather than run unauthenticated"
+
+printf '{"console":{"host":"198.51.100.1","port":443,"pin":"sha256//tooshort"}}' > "$CFG/omarchy-unifi/config.json"
+out="$(XDG_CONFIG_HOME="$CFG" ./bin/unifi-protect check 2>&1)"
+grep -q "no usable certificate pin" <<<"$out"
+check $? "a malformed pin is refused"
+
+! grep -q 'CONSOLE_PIN.*&&.*pinnedpubkey' lib/protect.sh
+check $? "the pin is never conditional on being present"
+
+# Camera ids are interpolated into request paths and become cache filenames.
+# This validation existed once and was deleted with the launcher provider.
+for sub in snapshot export stream-url play relay ptz-stop; do
+  out="$(./bin/unifi-protect "$sub" '../../etc/passwd' 2>&1)"
+  grep -q "invalid camera id" <<<"$out"
+  check $? "'$sub' rejects a camera id that would escape the cache directory"
+done
+out="$(./bin/unifi-protect toggle '../x' led on 2>&1)"
+grep -q "invalid camera id" <<<"$out"
+check $? "'toggle' rejects a traversing camera id"
+out="$(./bin/unifi-protect ptz-goto '../x' 0 2>&1)"
+grep -q "invalid camera id" <<<"$out"
+check $? "'ptz-goto' rejects a traversing camera id"
+
+grep -q "camera_id_valid \"\$id\" || continue" bin/unifi-protect
+check $? "the refresh sweep filters ids the console reports"
+
+# Every id-taking command has to validate; a missed one is the bug this
+# prevents, so the list is derived rather than hand-maintained.
+missing=""
+for sub in snapshot export stream-url play relay toggle ptz-goto ptz-patrol ptz-stop; do
+  fn="cmd_$(tr '-' '_' <<<"$sub")"
+  sed -n "/^${fn}() {/,/^}/p" bin/unifi-protect | grep -q "checked_camera_id" \
+    || missing="$missing $sub"
+done
+[[ -z $missing ]]
+check $? "every id-taking command validates it (missing:${missing:-none})"
+
+# Qt allocates for whatever dimensions a JPEG header claims, and the panel
+# hands it whatever the console sent.
+source lib/protect.sh 2>/dev/null || true
+set +e
+printf 'not an image' > "$TMP/notjpeg.bin"
+! snapshot_valid "$TMP/notjpeg.bin"
+check $? "a snapshot that is not a JPEG is refused"
+
+grep -q "MAX_SNAPSHOT_PIXELS\|MAX_PIXELS" lib/protect.sh
+check $? "snapshots are bounded by decode cost, not only by byte size"
+
+grep -q 'written <= MAX_SNAPSHOT_BYTES' lib/protect.sh
+check $? "the byte budget is checked against what landed, not the declared length"
+
+# A locked keyring or a host that accepts and stalls must not wedge the panel.
+for helper in "secret-tool store" "secret-tool lookup" "openssl s_client"; do
+  grep -q "timeout \"\$HELPER_TIMEOUT\" $helper" lib/protect.sh
+  check $? "'$helper' runs under a deadline"
+done
+
+# QML's default textFormat sniffs for markup, so a camera name containing a
+# tag would render as rich text instead of as the name.
+labels=$(grep -c "Label {" Panel.qml)
+plain=$(grep -c "textFormat: Text.PlainText" Panel.qml)
+[[ $labels -eq $plain ]]
+check $? "every label renders as plain text ($plain of $labels)"
+
+grep -q 'String(entry.name || "Camera").substring(0, 64)' Panel.qml
+check $? "remote camera names are length-capped where they enter the model"
 
 # ---------------------------------------------------------------- summary
 

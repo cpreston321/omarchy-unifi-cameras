@@ -13,13 +13,19 @@ meaning. Rather than escape them, `api_key_valid` accepts only the URL-safe
 base64 alphabet that Protect actually issues. A key containing a newline could
 otherwise append arbitrary curl options — the test suite covers exactly that.
 
-**Transport trust is a public-key pin, not a disabled check.** UniFi consoles
+**Transport trust is a public-key pin, and it is mandatory.** UniFi consoles
 serve self-signed certificates for internal names, so ordinary CA verification
 cannot succeed. `setup` records the leaf certificate's SHA-256 public-key
 fingerprint and every later request passes it as `--pinnedpubkey`, which curl
 enforces independently of `--insecure`. Replacing the console, or a machine on
 the path substituting its own certificate, fails every request loudly instead of
 silently trusting the new key.
+
+Because `--insecure` is unavoidable, the pin is the *only* thing authenticating
+the server, so a config without a usable one is refused rather than run. An
+earlier version made the pin conditional on being present, which meant a config
+written without one connected with no server authentication at all while this
+document claimed otherwise.
 
 **Requests cannot be redirected or proxied away.** Every call sets
 `--proto '=https'`, `--noproxy '*'`, and `--no-location`, with connect and total
@@ -41,10 +47,27 @@ this machine can read that stream; it is started only on an explicit press and
 torn down when live view ends, the camera changes, or the panel closes. The
 RTSPS URL itself never reaches a command line, and no credential is involved.
 
-**Ids from the console are used to build cache filenames.** Snapshots are written
-to `<cache>/snapshots/<id>.jpg`, so a hostile or malformed id would be a path.
-Ids come from the console over a pinned, authenticated connection, and the
-snapshot write is atomic into a directory this plugin owns.
+**Ids from the console are validated before they reach a path or a URL.**
+Camera ids are interpolated into request paths and become cache filenames, so
+every command that accepts one requires `^[A-Za-z0-9]{4,64}$` and the refresh
+sweep filters the ids the console reports. An id like `../../.bashrc` is
+refused rather than written.
+
+**Snapshots are validated before anything renders them.** Qt allocates for
+whatever dimensions a JPEG header claims, so the bytes are checked for a JPEG
+signature and the frame header is parsed for dimensions before the file is
+cached — a decompression bomb is refused. The byte budget is checked against
+what actually landed on disk, since `--max-filesize` is only enforced when the
+response declares a length.
+
+**Remote strings render as plain text.** Camera names and models come from the
+console and are drawn in the panel; every label sets `textFormat:
+Text.PlainText` rather than QML's default, which sniffs for markup, and the
+strings are length-capped where they enter the model.
+
+**Helpers run under deadlines.** `secret-tool` and `openssl s_client` are
+bounded, so a locked keyring or a host that accepts a connection and then stalls
+cannot wedge the panel.
 
 **Discovery only probes the local network, and reads nothing.** `scan` sends an
 unauthenticated GET to one integration-API path across this machine's ARP
@@ -74,6 +97,14 @@ so a partial write is never read back as truth.
 - **Siren, unlock, and other physical-effect endpoints are deliberately absent.**
   Nothing here can trip an alarm or open a door. Adding such a command should
   come with an explicit confirmation step.
+
+## Known gaps
+
+Config and cache files are read and written by pathname. A bounded, no-follow,
+directory-fd approach would close the window where a symlink is swapped between
+the check and the write; doing that properly means moving those paths out of
+shell. The directories are created `0700` and the writes are atomic renames,
+which narrows but does not close it.
 
 ## Reporting
 

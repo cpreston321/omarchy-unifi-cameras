@@ -18,6 +18,12 @@ readonly HTTP_TIMEOUT=10
 readonly HTTP_CONNECT_TIMEOUT=4
 readonly MAX_JSON_BYTES=4194304
 readonly MAX_SNAPSHOT_BYTES=16777216
+# A locked keyring prompting behind the panel, or a host that accepts the TCP
+# connection and then says nothing, must not wedge the caller indefinitely.
+readonly HELPER_TIMEOUT=15
+# Beyond any camera Protect ships; a frame larger than this is a decode cost,
+# not a picture.
+readonly MAX_SNAPSHOT_PIXELS=40000000
 
 config_dir()  { printf '%s\n' "${XDG_CONFIG_HOME:-$HOME/.config}/omarchy-unifi"; }
 config_path() { printf '%s\n' "$(config_dir)/config.json"; }
@@ -58,6 +64,12 @@ config_load() {
   CONSOLE_PIN="$(jq -r '.console.pin // empty' "$path")"
   [[ -n $CONSOLE_HOST ]] || die "config is missing console.host; re-run 'unifi-protect setup <host>'"
   [[ $CONSOLE_PORT =~ ^[0-9]+$ ]] || die "config has a non-numeric console.port"
+  # Fail closed. A console serves a self-signed certificate, so every request
+  # runs with --insecure and the pin is the *only* thing authenticating the
+  # server. Without one there is no authentication at all, which is worse than
+  # refusing to connect — and worse still because it looks like it is working.
+  pin_valid "$CONSOLE_PIN" \
+    || die "config has no usable certificate pin; re-run 'unifi-protect setup ${CONSOLE_HOST}' to pin this console"
   CONFIG_LOADED=1
 }
 
@@ -77,6 +89,7 @@ console_origin() {
 
 config_write() {
   local host=$1 port=$2 pin=$3
+  pin_valid "$pin" || die "refusing to write a config without a usable certificate pin"
   local dir path tmp
   dir="$(config_dir)"; path="$(config_path)"
   mkdir -p "$dir"; chmod 700 "$dir"
@@ -96,7 +109,7 @@ api_key_store() {
   # Reads the key from stdin so it is never an argument to secret-tool.
   local host=$1
   require_tools secret-tool
-  secret-tool store --label="UniFi Protect API key ($host)" \
+  timeout "$HELPER_TIMEOUT" secret-tool store --label="UniFi Protect API key ($host)" \
     application omarchy-unifi kind api-key host "$host"
 }
 
@@ -107,12 +120,12 @@ api_key_store() {
 api_key_present() {
   config_load
   require_tools secret-tool
-  secret-tool lookup application omarchy-unifi kind api-key host "$CONSOLE_HOST" >/dev/null 2>&1
+  timeout "$HELPER_TIMEOUT" secret-tool lookup application omarchy-unifi kind api-key host "$CONSOLE_HOST" >/dev/null 2>&1
 }
 
 api_key_lookup() {
   config_load
-  secret-tool lookup application omarchy-unifi kind api-key host "$CONSOLE_HOST" 2>/dev/null
+  timeout "$HELPER_TIMEOUT" secret-tool lookup application omarchy-unifi kind api-key host "$CONSOLE_HOST" 2>/dev/null
 }
 
 # Run in the caller's shell, before any substitution, so both failure modes
@@ -140,17 +153,34 @@ api_key_valid() { [[ $1 =~ ^[A-Za-z0-9._~+/=-]{16,512}$ ]]; }
 # Public-key pin of the console's leaf certificate, in curl's --pinnedpubkey
 # format. Captured once at setup; a change afterwards fails every request loudly
 # rather than silently trusting a new certificate.
+# curl's --pinnedpubkey format: sha256// then base64 of a SHA-256 digest,
+# which is always 43 characters plus one '=' of padding.
+# Camera ids come from the console and are used two ways that both matter:
+# they are interpolated into request paths, and they become cache filenames.
+# A console that is compromised, spoofed, or simply buggy must not be able to
+# steer either — an id like "../../.bashrc" is a write outside the cache.
+camera_id_valid() { [[ $1 =~ ^[A-Za-z0-9]{4,64}$ ]]; }
+
+checked_camera_id() {
+  camera_id_valid "${1-}" || die "invalid camera id"
+  printf '%s\n' "$1"
+}
+
+pin_valid() { [[ $1 =~ ^sha256//[A-Za-z0-9+/]{43}=$ ]]; }
+
 fetch_pin() {
   local host=$1 port=$2
   require_tools openssl
   local der
-  der="$(openssl s_client -connect "$host:$port" -servername "$host" </dev/null 2>/dev/null \
+  der="$(timeout "$HELPER_TIMEOUT" openssl s_client -connect "$host:$port" -servername "$host" </dev/null 2>/dev/null \
     | openssl x509 -pubkey -noout 2>/dev/null \
     | openssl pkey -pubin -outform der 2>/dev/null \
     | openssl dgst -sha256 -binary 2>/dev/null \
     | base64 -w0 2>/dev/null)" || true
   [[ -n $der ]] || die "could not read a TLS certificate from $host:$port"
-  printf 'sha256//%s\n' "$der"
+  local pin="sha256//${der}"
+  pin_valid "$pin" || die "the certificate from $host:$port did not yield a usable pin"
+  printf '%s\n' "$pin"
 }
 
 # ------------------------------------------------------------------ HTTP
@@ -166,8 +196,9 @@ curl_common() {
     --proto '=https' --noproxy '*' --no-location \
     --connect-timeout "$HTTP_CONNECT_TIMEOUT" --max-time "$HTTP_TIMEOUT" \
     --insecure
-  [[ -n $CONSOLE_PIN ]] && printf '%s\n' --pinnedpubkey "$CONSOLE_PIN"
-  return 0
+  # config_load has already refused an unusable pin, so this is never the
+  # bare --insecure that would leave the server unauthenticated.
+  printf '%s\n' --pinnedpubkey "$CONSOLE_PIN"
 }
 
 # api_request METHOD PATH [JSON_BODY]
@@ -193,6 +224,46 @@ api_request() {
   printf 'header = "X-API-Key: %s"\n' "$key" | curl --config - "${args[@]}"
 }
 
+# Confirms the bytes are a JPEG and that decoding one will not cost more than
+# it is worth. The panel hands this file to Qt, which will happily allocate for
+# whatever dimensions the header claims — so the header is read here, before
+# anything renders it, rather than trusting the console.
+snapshot_valid() {
+  python3 - "$1" <<'PYTHON'
+import struct, sys
+
+MAX_PIXELS = 40_000_000
+path = sys.argv[1]
+
+with open(path, "rb") as handle:
+    data = handle.read(1024 * 128)
+
+if not data.startswith(b"\xff\xd8\xff"):
+    sys.exit(1)
+
+# Walk the JPEG segments to the frame header, which carries the dimensions.
+offset = 2
+while offset + 9 < len(data):
+    if data[offset] != 0xFF:
+        offset += 1
+        continue
+    marker = data[offset + 1]
+    if marker in (0xD8, 0x01) or 0xD0 <= marker <= 0xD7:
+        offset += 2
+        continue
+    length = struct.unpack(">H", data[offset + 2:offset + 4])[0]
+    # SOF0-SOF15, excluding the non-frame markers that share the range.
+    if 0xC0 <= marker <= 0xCF and marker not in (0xC4, 0xC8, 0xCC):
+        height, width = struct.unpack(">HH", data[offset + 5:offset + 9])
+        sys.exit(0 if 0 < width * height <= MAX_PIXELS else 1)
+    offset += 2 + length
+
+# A JPEG whose dimensions are past the window read above is not one a camera
+# produced.
+sys.exit(1)
+PYTHON
+}
+
 # api_snapshot CAMERA_ID OUTPUT_PATH — writes a JPEG, atomically.
 api_snapshot() {
   local id=$1 out=$2
@@ -216,6 +287,14 @@ api_snapshot() {
   # A console that is booting answers 200 with an empty body; treat that as a
   # miss rather than replacing a good cached frame with a blank one.
   [[ -s $tmp ]] || die "empty snapshot for camera $id"
+  # --max-filesize is only enforced when the response declares a length, so a
+  # chunked reply can walk straight past it. This is the budget that actually
+  # holds, checked against what landed on disk.
+  local written
+  written="$(stat -c %s "$tmp")"
+  (( written <= MAX_SNAPSHOT_BYTES )) \
+    || die "snapshot for camera $id is ${written} bytes; limit is ${MAX_SNAPSHOT_BYTES}"
+  snapshot_valid "$tmp" || die "the console did not return a usable JPEG for camera $id"
   mv "$tmp" "$out"
   printf '%s\n' "$out"
 }
