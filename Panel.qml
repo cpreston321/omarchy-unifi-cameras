@@ -233,7 +233,10 @@ Panel {
     open: root.opened
     focusTarget: keyCatcher
     contentWidth: panel.fittedContentWidth(Style.space(620))
-    contentHeight: panel.fittedContentHeight(Style.space(520))
+    // An empty state needs a fraction of the grid's height. Keeping the full
+    // 520 leaves it marooned in dead space, which reads as a broken panel
+    // rather than a deliberate message.
+    contentHeight: panel.fittedContentHeight(root.ready ? Style.space(520) : Style.space(280))
 
     PanelKeyCatcher {
       id: keyCatcher
