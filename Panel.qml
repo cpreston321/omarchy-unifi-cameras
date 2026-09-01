@@ -569,14 +569,26 @@ Panel {
 
     // --------------------------------------------------------------- camera
 
-    // No margins of its own: KeyboardPanel already insets its content by
-    // Style.spacing.popupPadding, so anything added here is padding on top of
-    // padding — which is what made the panel look over-inset.
-    ColumnLayout {
-      id: cameraView
+    // The panel is sized to its content but capped to the screen, so on a
+    // short display — or with settings expanded and several cameras — the
+    // content can exceed the card. Without this it would simply clip, with no
+    // way to reach the rest.
+    Flickable {
       anchors.fill: parent
-      spacing: 0
       visible: root.ready
+      contentWidth: width
+      contentHeight: cameraView.implicitHeight
+      clip: true
+      boundsBehavior: Flickable.StopAtBounds
+      interactive: contentHeight > height
+
+      // No margins of its own: KeyboardPanel already insets its content by
+      // Style.spacing.popupPadding, so anything added here is padding on top
+      // of padding — which is what made the panel look over-inset.
+      ColumnLayout {
+        id: cameraView
+        width: parent.width
+        spacing: 0
 
       // Title block
       RowLayout {
@@ -1162,6 +1174,7 @@ Panel {
           }
         }
       }
+    }
     }
   }
 }

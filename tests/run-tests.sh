@@ -343,6 +343,11 @@ check $? "detection toggles read the live list before rewriting it"
 grep -q "root.loadCameras()" Panel.qml
 check $? "a switch follows the console's answer rather than the press"
 
+# The panel is content-sized but capped to the screen, so anything that can
+# grow past the cap has to be reachable.
+grep -q "interactive: contentHeight > height" Panel.qml
+check $? "content taller than the card scrolls instead of clipping"
+
 # KeyboardPanel already insets its content by popupPadding; margins here are
 # padding on top of padding.
 ! grep -q "anchors.margins: Style.space(16)" Panel.qml
