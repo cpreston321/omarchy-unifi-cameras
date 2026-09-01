@@ -41,8 +41,8 @@ if [[ -x $QMLLINT ]] && [[ -d ${OMARCHY_PATH:-/usr/share/omarchy}/shell ]]; then
   ln -sfn "${OMARCHY_PATH:-/usr/share/omarchy}/shell" "$qmlroot/qs"
   lint="$("$QMLLINT" -I "$qmlroot" BarWidget.qml Panel.qml 2>&1)"
   rm -rf "$qmlroot"
-  ! grep -qE "^Error:|layout-positioning" <<<"$lint"
-  check $? "qmllint reports no errors or layout-positioning warnings"
+  ! grep -qE "^Error:|layout-positioning|property-override" <<<"$lint"
+  check $? "qmllint reports no errors, layout, or shadowed-property warnings"
 else
   skipt "qmllint or the Omarchy shell is not available"
 fi
@@ -175,6 +175,33 @@ check $? "the missing-key error names the fix"
 
 ! grep -q "unexpected format" <<<"$out"
 check $? "a missing key is not also reported as malformed"
+
+# The panel decides which screen to show from `status`, so it must classify
+# every setup state, always succeed, and never emit the key itself.
+st="$(XDG_CONFIG_HOME="$TMP/nothing" ./bin/unifi-protect status)"
+[[ $? -eq 0 ]] && jq -e '.state == "no-console" and .configured == false' <<<"$st" >/dev/null
+check $? "status reports no-console without a config"
+
+printf '{"console":{"host":"198.51.100.1","port":443,"pin":""}}' > "$CFG/omarchy-unifi/config.json"
+st="$(XDG_CONFIG_HOME="$CFG" ./bin/unifi-protect status)"
+jq -e '.state == "no-key" and .configured == true and .hasKey == false and .host == "198.51.100.1"' <<<"$st" >/dev/null
+check $? "status distinguishes a configured console with no key"
+
+printf 'not json' > "$CFG/omarchy-unifi/config.json"
+st="$(XDG_CONFIG_HOME="$CFG" ./bin/unifi-protect status)"
+jq -e '.state == "bad-config"' <<<"$st" >/dev/null
+check $? "status reports bad-config for unreadable settings"
+
+! jq -e 'to_entries | map(.key) | index("key")' <<<"$st" >/dev/null 2>&1
+check $? "status never includes the key itself"
+
+# Every state the CLI can report needs copy in the panel, or the empty screen
+# falls back to a message that does not match the actual problem.
+for st_name in no-console bad-config no-key bad-key ready; do
+  grep -q "\"$st_name\"" bin/unifi-protect || continue
+  [[ $st_name == ready ]] || grep -q "\"$st_name\":" Panel.qml
+  check $? "the panel has copy for the '$st_name' state"
+done
 
 out="$(XDG_CONFIG_HOME="$CFG" ./bin/unifi-protect probe cameras 2>&1)"
 grep -q "usage: unifi-protect probe" <<<"$out"

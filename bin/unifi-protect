@@ -16,6 +16,7 @@ setup <host> [port]     Pin the console's certificate, store an API key (stdin),
 key-set                 Replace the stored API key, read from stdin
 forget                  Remove the stored key and config
 check                   Verify connectivity and print console identity
+status                  Setup state as JSON, for the panel (never fails)
 cameras [--json]        List cameras
 snapshot <id> [path]    Fetch a JPEG (defaults to the snapshot cache)
 refresh                 Refresh cached snapshots for every connected camera
@@ -103,6 +104,47 @@ cmd_check() {
   local info
   info="$(api_request GET /meta/info)"
   printf '%s\n' "$info" | jq -r '"Connected to \(.applicationVersion // "Protect") on \(.name // "console")"'
+}
+
+# Setup state as JSON, for the panel. Always exits 0 and never touches the
+# network: the panel needs to tell "no console" from "no key" from "bad key" to
+# offer the right action, and parsing English out of stderr is not that.
+cmd_status() {
+  local state detail host="" configured=false has_key=false key=""
+
+  if ! config_present; then
+    state="no-console"
+    detail="No console has been connected yet."
+  elif ! jq -e . "$(config_path)" >/dev/null 2>&1; then
+    state="bad-config"
+    detail="The saved console settings are not readable."
+  else
+    host="$(jq -r '.console.host // empty' "$(config_path)" 2>/dev/null || true)"
+    if [[ -z $host ]]; then
+      state="bad-config"
+      detail="The saved console settings have no address."
+    else
+      configured=true
+      key="$(secret-tool lookup application omarchy-unifi kind api-key host "$host" 2>/dev/null || true)"
+      if [[ -z $key ]]; then
+        state="no-key"
+        detail="Create an API key on the console under Control Plane > Integrations, then add it here."
+      elif ! api_key_valid "$key"; then
+        has_key=true
+        state="bad-key"
+        detail="The key in your keyring is not in the format Protect issues."
+      else
+        has_key=true
+        state="ready"
+        detail=""
+      fi
+    fi
+  fi
+  unset key
+
+  jq -n --arg state "$state" --arg host "$host" --arg detail "$detail" \
+    --argjson configured "$configured" --argjson hasKey "$has_key" \
+    '{state: $state, host: $host, detail: $detail, configured: $configured, hasKey: $hasKey}'
 }
 
 # ------------------------------------------------------------------ cameras
@@ -258,6 +300,7 @@ main() {
     key-set)     cmd_key_set "$@" ;;
     forget)      cmd_forget "$@" ;;
     check)       cmd_check "$@" ;;
+    status)      cmd_status "$@" ;;
     cameras)     cmd_cameras "$@" ;;
     snapshot)    cmd_snapshot "$@" ;;
     refresh)     cmd_refresh "$@" ;;
