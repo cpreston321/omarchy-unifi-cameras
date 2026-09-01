@@ -270,6 +270,7 @@ Panel {
         }
         rows.sort(function(a, b) { return a.name.localeCompare(b.name) })
         root.cameras = rows
+        if (!root.shotAt) root.refreshSelected()
       } catch (error) {
         root.setupState = "unreachable"
         root.detail = "Could not read the camera list."
@@ -701,7 +702,8 @@ Panel {
             Label {
               text: root.liveMode === "live" ? "Live"
                 : (root.liveMode === "connecting" ? "Connecting…"
-                  : (root.wantLive ? "Live · stills" : "Snapshot · " + root.shotAge))
+                  : (root.wantLive ? "Live · stills"
+                    : (root.shotAt ? "Snapshot · " + root.shotAge : "Snapshot"))))
               color: "#ffffff"
               font.family: root.contentFontFamily
               font.pixelSize: Style.font.caption
