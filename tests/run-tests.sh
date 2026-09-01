@@ -162,6 +162,20 @@ check $? "a config without a host is reported as such"
 XDG_CONFIG_HOME="$CFG" HOME="$TMP" ./bin/unifi-protect forget >/dev/null 2>&1
 check $? "forget succeeds without a usable config"
 
+# A configured console with no key in the keyring is the state right after
+# `setup` is interrupted. It must report the missing key once, not follow up
+# with a bogus complaint about the key's format.
+printf '{"console":{"host":"198.51.100.1","port":443,"pin":""}}' > "$CFG/omarchy-unifi/config.json"
+out="$(XDG_CONFIG_HOME="$CFG" ./bin/unifi-protect check 2>&1)"
+[[ $(wc -l <<<"$out") -eq 1 ]]
+check $? "a missing API key reports exactly one error"
+
+grep -q "no API key stored" <<<"$out"
+check $? "the missing-key error names the fix"
+
+! grep -q "unexpected format" <<<"$out"
+check $? "a missing key is not also reported as malformed"
+
 out="$(XDG_CONFIG_HOME="$CFG" ./bin/unifi-protect probe cameras 2>&1)"
 grep -q "usage: unifi-protect probe" <<<"$out"
 check $? "probe rejects a path that is not absolute"

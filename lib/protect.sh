@@ -100,11 +100,29 @@ api_key_store() {
     application omarchy-unifi kind api-key host "$host"
 }
 
-api_key_lookup() {
+# Presence is checked separately from retrieval because callers read the key
+# through a command substitution, and a `die` there would only kill the
+# subshell — leaving the caller to continue with an empty key and report a
+# second, misleading error about its format.
+api_key_present() {
   config_load
   require_tools secret-tool
-  secret-tool lookup application omarchy-unifi kind api-key host "$CONSOLE_HOST" 2>/dev/null \
-    || die "no API key stored for $CONSOLE_HOST; run 'unifi-protect key-set'"
+  secret-tool lookup application omarchy-unifi kind api-key host "$CONSOLE_HOST" >/dev/null 2>&1
+}
+
+api_key_lookup() {
+  config_load
+  secret-tool lookup application omarchy-unifi kind api-key host "$CONSOLE_HOST" 2>/dev/null
+}
+
+# Run in the caller's shell, before any substitution, so both failure modes
+# abort with exactly one message.
+require_api_key() {
+  config_load
+  api_key_present || die "no API key stored for $CONSOLE_HOST; run 'unifi-protect key-set'"
+  local key
+  key="$(api_key_lookup)"
+  api_key_valid "$key" || die "the stored API key has an unexpected format; re-run 'unifi-protect key-set'"
 }
 
 api_key_clear() {
@@ -158,10 +176,9 @@ curl_common() {
 api_request() {
   local method=$1 path=$2 body=${3-}
   require_tools curl jq
-  config_load
+  require_api_key
   local key origin
   key="$(api_key_lookup)"
-  api_key_valid "$key" || die "stored API key has an unexpected format; re-run 'unifi-protect key-set'"
   origin="$(console_origin)"
 
   local -a args
@@ -180,10 +197,9 @@ api_request() {
 api_snapshot() {
   local id=$1 out=$2
   require_tools curl
-  config_load
+  require_api_key
   local key origin tmp
   key="$(api_key_lookup)"
-  api_key_valid "$key" || die "stored API key has an unexpected format"
   origin="$(console_origin)"
   mkdir -p "$(dirname "$out")"
   tmp="$(mktemp "${out}.XXXXXX")"
