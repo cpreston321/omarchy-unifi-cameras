@@ -298,6 +298,14 @@ check $? "Escape dismisses the camera menu before closing the panel"
 ! grep -q '"Online" : "Offline") + " · "' Panel.qml
 check $? "the subtitle no longer repeats the online state"
 
+# The model sits in CAMERA DETAILS; printing it under the button too was the
+# same fact twice on one screen.
+! grep -q "root.selected.model : \"\"" Panel.qml
+check $? "the model is not repeated under the camera button"
+
+grep -q 'label: "Model"' Panel.qml
+check $? "the model is still reported in the details list"
+
 # KeyboardPanel already insets its content by popupPadding; margins here are
 # padding on top of padding.
 ! grep -q "anchors.margins: Style.space(16)" Panel.qml

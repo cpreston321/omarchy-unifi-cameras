@@ -592,16 +592,14 @@ Panel {
         spacing: Style.space(8)
         visible: root.selected !== null
 
-        ColumnLayout {
+        Item {
           Layout.fillWidth: true
-          spacing: Style.space(3)
+          Layout.preferredHeight: cameraButton.height
 
           Rectangle {
             id: cameraButton
-            Layout.preferredHeight: Style.spacing.controlHeight
-            Layout.preferredWidth: Math.min(
-              cameraButtonRow.implicitWidth + Style.space(20),
-              cameraButton.parent.width)
+            height: Style.spacing.controlHeight
+            width: Math.min(cameraButtonRow.implicitWidth + Style.space(20), parent.width)
             radius: Style.cornerRadius
 
             // With one camera there is nothing to choose, so the control keeps
@@ -724,21 +722,10 @@ Panel {
             }
           }
 
-          // The dot carries the online state now, so this says what the camera
-          // is rather than repeating that it is up.
-          Label {
-            Layout.fillWidth: true
-            text: root.selected ? root.selected.model : ""
-            elide: Text.ElideRight
-            color: root.contentForeground
-            font.family: root.contentFontFamily
-            font.pixelSize: Style.font.bodySmall
-            opacity: 0.5
-          }
         }
 
         Button {
-          Layout.alignment: Qt.AlignTop
+          Layout.alignment: Qt.AlignVCenter
           iconText: "\uf021"
           tooltipText: "Refresh snapshot"
           enabled: root.selected !== null && root.selected.connected
