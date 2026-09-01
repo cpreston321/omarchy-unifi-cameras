@@ -51,6 +51,25 @@ connection. `unifi-protect scan` runs discovery on its own.
 The panel offers the same thing: **Connect a console…** opens a terminal on
 this, so setup never needs a path typed by hand.
 
+## Removal
+
+```bash
+omarchy plugin remove quantumfire.unifi-cameras
+```
+
+That removes the plugin and its bar widget. It leaves the API key in your
+keyring and the cached snapshots on disk, so run this first if you want those
+gone too:
+
+```bash
+~/.config/omarchy/plugins/quantumfire.unifi-cameras/bin/unifi-protect forget
+```
+
+`forget` clears the stored key, the console settings in
+`~/.config/omarchy-unifi/`, and the snapshot cache. Nothing on the console is
+changed — cameras, RTSP, and any settings altered from the panel stay as they
+are.
+
 ## Using it
 
 The panel's title carries your console's own logo, fetched from it on first
