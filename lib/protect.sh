@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Shared runtime for the UniFi Protect plugin. Sourced by bin/unifi-protect and
-# bin/omalaunch-provider; not executable on its own.
+# Shared runtime for the UniFi Protect plugin. Sourced by bin/unifi-protect;
+# not executable on its own.
 #
 # Two invariants shape everything below:
 #   1. The API key never reaches argv or the environment. It is written into a

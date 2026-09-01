@@ -41,11 +41,10 @@ this machine can read that stream; it is started only on an explicit press and
 torn down when live view ends, the camera changes, or the panel closes. The
 RTSPS URL itself never reaches a command line, and no credential is involved.
 
-**Ids from the console are constrained before use.** Camera ids are used to build
-cache filenames and argument arrays, so the Omalaunch provider requires them to
-match `^[A-Za-z0-9]{4,64}$` and drops anything else — a name like `../../etc/passwd`
-never becomes a path. The test suite asserts this against a fixture that contains
-one.
+**Ids from the console are used to build cache filenames.** Snapshots are written
+to `<cache>/snapshots/<id>.jpg`, so a hostile or malformed id would be a path.
+Ids come from the console over a pinned, authenticated connection, and the
+snapshot write is atomic into a directory this plugin owns.
 
 **Discovery only probes the local network, and reads nothing.** `scan` sends an
 unauthenticated GET to one integration-API path across this machine's ARP

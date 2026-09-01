@@ -300,19 +300,10 @@ cmd_snapshot() {
 # Refreshes the cache the panel reads. Failures for one camera never abort the
 # sweep: a single offline doorbell must not blank the whole grid.
 cmd_refresh() {
-  local dir id list tmp
+  local dir id
   dir="$(snapshot_dir)"
   mkdir -p "$dir"
   [[ -s "$(cache_dir)/logo.svg" ]] || cmd_logo >/dev/null 2>&1 || true
-  # The Omalaunch provider runs under a five-second budget and must not touch
-  # the network, so the camera list is cached here for it to read offline.
-  list="$(cache_dir)/cameras.json"
-  tmp="$(mktemp "$(cache_dir)/.cameras.XXXXXX")"
-  if cameras_json | jq '[.[] | {id, name, state, type: (.modelKey // "camera"), featureFlags}]' > "$tmp" 2>/dev/null; then
-    mv "$tmp" "$list"
-  else
-    rm -f "$tmp"
-  fi
   while IFS= read -r id; do
     [[ -n $id ]] || continue
     api_snapshot "$id" "$dir/${id}.jpg" >/dev/null 2>&1 || true

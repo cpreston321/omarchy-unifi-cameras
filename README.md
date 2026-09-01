@@ -1,7 +1,7 @@
 # UniFi Cameras for Omarchy
 
 A local-first Omarchy plugin for UniFi Protect. Snapshots and live view for
-every camera on your console, from the bar or from Omalaunch — using Protect's
+every camera on your console, from the bar — using Protect's
 official local integration API, an API key stored in the Secret Service, and a
 pinned certificate. No Ubiquiti account, no cloud round-trip, no camera daemon
 added to Omarchy.
@@ -46,8 +46,8 @@ It then reads the console's certificate, stores its public-key fingerprint,
 prompts for the API key, saves the key in the Secret Service, and verifies the
 connection. `unifi-protect scan` runs discovery on its own.
 
-You can do all of this from the launcher instead: type `unifi` in Omalaunch,
-pick **Connect a console…**, and press Enter to scan.
+The panel offers the same thing: **Connect a console…** opens a terminal on
+this, so setup never needs a path typed by hand.
 
 ## Using it
 
@@ -58,11 +58,6 @@ you own rather than shipped with the plugin.
 **From the bar.** Click the camera icon for a grid of snapshots, refreshed
 every 30 seconds while the panel is open. Click a camera to watch it in mpv;
 right-click to save a still into `~/Pictures/UniFi/<date>/`.
-
-**From Omalaunch.** Type `cam` for the camera list, then pick Live view, a
-low-bandwidth stream, a snapshot, or — on PTZ models — a preset slot. The
-camera list comes from a local cache, so the launcher never blocks on the
-network. Refresh it from the bar panel or with `unifi-protect refresh`.
 
 **From a terminal.**
 
@@ -161,9 +156,10 @@ what this design does *not* protect against, are in [SECURITY.md](SECURITY.md).
 ./tests/run-tests.sh
 ```
 
-Fully offline: manifest validation, both Omalaunch extension definitions checked
-against Omalaunch's own `normalizeExtension`, provider behavior against
-fixtures, API-key format guards, `qmllint`, and shell syntax.
+Fully offline: manifest validation, API-key format guards, the settings the
+integration API accepts, CLI error paths, `qmllint`, and shell syntax. Nothing
+here talks to a console; hardware behaviour is recorded in
+[docs/verifying-against-hardware.md](docs/verifying-against-hardware.md).
 
 ## Credit
 

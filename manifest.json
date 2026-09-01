@@ -5,10 +5,9 @@
   "version": "0.1.0",
   "author": "Christian Preston",
   "license": "MIT",
-  "description": "Local-first UniFi Protect camera panel: snapshots, live view in mpv, events, and PTZ presets. No cloud account, no camera daemon.",
+  "description": "Local-first UniFi Protect camera panel: live view, snapshots, and camera settings. No cloud account, no camera daemon.",
   "kinds": [
-    "bar-widget",
-    "extension"
+    "bar-widget"
   ],
   "entryPoints": {
     "barWidget": "BarWidget.qml"
@@ -40,16 +39,6 @@
         "type": "string",
         "label": "In-panel live stream quality (high, medium, low)"
       }
-    ]
-  },
-  "omalaunch": {
-    "extensions": [
-      "omalaunch.json"
-    ],
-    "extensionProviders": [
-      [
-        "./bin/omalaunch-provider"
-      ]
     ]
   }
 }

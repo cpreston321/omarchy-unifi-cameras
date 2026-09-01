@@ -409,10 +409,11 @@ Panel {
 
   property Process setupProcess: Process {}
   // Setup and key entry both need a terminal: they prompt, and one of them
-  // reads a secret that must not pass through the panel.
+  // reads a secret that must not pass through the panel. The wrapper holds the
+  // window open afterwards, so the result is still there to read.
   function runSetupAction(subcommand) {
     if (!subcommand || subcommand.length === 0) return
-    setupProcess.command = ["omarchy-launch-terminal", root.cli].concat(subcommand)
+    setupProcess.command = ["omarchy-launch-terminal", root.localPath("bin/unifi-terminal")].concat(subcommand)
     setupProcess.running = true
     root.close()
   }

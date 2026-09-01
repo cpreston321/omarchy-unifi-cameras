@@ -15,16 +15,13 @@ check() { if [[ $1 -eq 0 ]]; then ok "$2"; else no "$2"; fi; }
 
 # ---------------------------------------------------------------- syntax
 
-for script in lib/protect.sh bin/unifi-protect bin/unifi-setup-terminal tests/run-tests.sh; do
+for script in lib/protect.sh bin/unifi-protect bin/unifi-terminal tests/run-tests.sh; do
   bash -n "$script" 2>/dev/null
   check $? "bash syntax: $script"
 done
 
-python3 -c "import ast,sys; ast.parse(open('bin/omalaunch-provider').read())" 2>/dev/null
-check $? "python syntax: bin/omalaunch-provider"
-
 if command -v shellcheck >/dev/null 2>&1; then
-  shellcheck -S warning lib/protect.sh bin/unifi-protect bin/unifi-setup-terminal >/dev/null 2>&1
+  shellcheck -S warning lib/protect.sh bin/unifi-protect bin/unifi-terminal >/dev/null 2>&1
   check $? "shellcheck is clean"
 else
   skipt "shellcheck not installed"
@@ -52,8 +49,13 @@ fi
 jq -e . manifest.json >/dev/null 2>&1
 check $? "manifest.json is valid JSON"
 
-jq -e '.omalaunch.extensions and .omalaunch.extensionProviders' manifest.json >/dev/null 2>&1
-check $? "manifest declares both Omalaunch contribution paths"
+# This is a standalone Omarchy plugin. A launcher contribution would make it
+# load, and fail, on machines that do not have that launcher.
+! jq -e 'has("omalaunch") or (.kinds | index("extension"))' manifest.json >/dev/null 2>&1
+check $? "the manifest declares no launcher coupling"
+
+! grep -rqil "omalaunch" --exclude-dir=.git --exclude=run-tests.sh .
+check $? "no launcher references remain anywhere in the repo"
 
 if command -v omarchy-plugin-validate >/dev/null 2>&1; then
   omarchy-plugin-validate . >/dev/null 2>&1
@@ -67,10 +69,13 @@ for entry in $(jq -r '.entryPoints[]' manifest.json); do
   check $? "entry point exists: $entry"
 done
 
-for provider in $(jq -r '.omalaunch.extensionProviders[][0]' manifest.json); do
-  [[ -x $provider ]]
-  check $? "extension provider is executable: $provider"
-done
+# The panel dispatches through the wrapper so a terminal action's output
+# survives the command finishing.
+[[ -x bin/unifi-terminal ]]
+check $? "the terminal wrapper is executable"
+
+grep -q "bin/unifi-terminal" Panel.qml
+check $? "the panel opens terminals through the wrapper, not the CLI directly"
 
 # ---------------------------------------------------------------- key format
 
@@ -88,43 +93,10 @@ api_key_valid 'abcdEFGH01234567\' && no "a backslash in a key is rejected" || ok
 api_key_valid "$(printf 'abcdEFGH01234567\nheader = "X-Evil: 1"')" \
   && no "a newline in a key is rejected" || ok "a newline in a key is rejected"
 
-# ---------------------------------------------------------------- provider
+# ---------------------------------------------------------------- cli
 
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
-mkdir -p "$TMP/omarchy-unifi"
-
-# No cache at all: the launcher must get an empty catalog, not an error.
-out="$(XDG_CACHE_HOME="$TMP/empty" ./bin/omalaunch-provider 2>/dev/null)"
-[[ $out == "[]" ]]
-check $? "provider emits an empty catalog when no console is configured"
-
-cp tests/fixtures/cameras.json "$TMP/omarchy-unifi/cameras.json"
-provider_out="$(XDG_CACHE_HOME="$TMP" ./bin/omalaunch-provider)"
-
-printf '%s' "$provider_out" | jq -e . >/dev/null 2>&1
-check $? "provider emits valid JSON"
-
-count="$(printf '%s' "$provider_out" | jq '.workflow.items | length')"
-[[ $count -eq 3 ]]
-check $? "provider drops entries with a malformed or missing id (got $count of 5)"
-
-printf '%s' "$provider_out" | jq -e '[.workflow.items[].label] == ["Driveway PTZ", "Front Door", "Garage"]' >/dev/null
-check $? "provider sorts cameras by name"
-
-printf '%s' "$provider_out" | jq -e '.workflow.items[] | select(.label == "Driveway PTZ") | .items | map(.id) | index("preset")' >/dev/null
-check $? "a PTZ camera gets a preset node"
-
-printf '%s' "$provider_out" | jq -e '.workflow.items[] | select(.label == "Front Door") | .items | map(.id) | index("preset") == null' >/dev/null
-check $? "a non-PTZ camera gets no preset node"
-
-# Every command has to be an argument array the launcher can dispatch without a
-# shell; a bare string would be silently dropped by normalizeExtension.
-printf '%s' "$provider_out" | jq -e '[.workflow.items[].items[] | .command // []] | all(type == "array" and length > 0)' >/dev/null
-check $? "every workflow leaf carries an argument-array command"
-
-# ---------------------------------------------------------------- cli
-
 CFG="$TMP/config"
 
 # Every subcommand must be reachable from the dispatcher. `probe` was defined
@@ -364,10 +336,6 @@ check $? "an unauthenticated 401 is what identifies a console"
 grep -q "setup_choose_host" bin/unifi-protect
 check $? "setup offers what the scan found instead of demanding an address"
 
-jq -e '.workflow.items[0].allowEmpty == true and (.workflow.items[0].emptyCommand | length) > 0' \
-  omalaunch.json >/dev/null
-check $? "the launcher setup entry scans when submitted empty"
-
 # A scan that sweeps every reachable subnet costs seconds for no real gain.
 grep -q "SCAN_MAX_HOSTS" bin/unifi-protect
 check $? "the scan is bounded"
@@ -400,35 +368,8 @@ check $? "vertical gaps are set per boundary rather than inherited"
 grep -q "rtsp_disabled_message" bin/unifi-protect
 check $? "a disabled RTSP channel produces actionable guidance"
 
-grep -q 'in model.lower()' bin/omalaunch-provider
-check $? "PTZ is detected from the model name, not a featureFlags key"
-
-! grep -q 'isPtz\|canOpticalZoom' bin/omalaunch-provider
-check $? "the provider no longer reads featureFlags keys Protect does not send"
-
-# ------------------------------------------------- Omalaunch schema conformance
-
-OMALAUNCH="${OMALAUNCH_PATH:-$HOME/Documents/projects/omalaunch}"
-if command -v node >/dev/null 2>&1 && [[ -f $OMALAUNCH/MenuModel.js ]]; then
-  printf '%s' "$provider_out" > "$TMP/provider.json"
-  node -e '
-    const fs = require("fs"), vm = require("vm")
-    const context = { module: { exports: {} } }
-    vm.runInNewContext(fs.readFileSync(process.argv[1], "utf8"), context)
-    const menu = context.module.exports
-    let bad = 0
-    for (const file of process.argv.slice(2)) {
-      const normalized = menu.normalizeExtension(JSON.parse(fs.readFileSync(file, "utf8")))
-      if (!normalized || normalized.mode !== "workflow" || !normalized.workflow) {
-        console.error("rejected: " + file); bad++
-      }
-    }
-    process.exit(bad ? 1 : 0)
-  ' "$OMALAUNCH/MenuModel.js" omalaunch.json "$TMP/provider.json" >/dev/null 2>&1
-  check $? "both extensions pass Omalaunch's normalizeExtension"
-else
-  skipt "Omalaunch checkout or node not available for schema conformance"
-fi
+! grep -q 'isPtz\|canOpticalZoom' bin/unifi-protect
+check $? "nothing reads featureFlags keys Protect does not send"
 
 # ---------------------------------------------------------------- summary
 
