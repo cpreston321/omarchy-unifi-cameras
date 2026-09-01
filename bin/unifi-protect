@@ -50,13 +50,15 @@ cmd_setup() {
   pin="$(fetch_pin "$host" "$port")"
   printf 'Pinned certificate: %s\n' "$pin" >&2
 
-  local key
+  local key=""
   if [[ -t 0 ]]; then
     printf 'Paste the Protect API key (Control Plane > Integrations): ' >&2
-    read -rs key; printf '\n' >&2
+    read -rs key || true
+    printf '\n' >&2
   else
-    read -r key
+    read -r key || true
   fi
+  key="${key//[$'\r\n\t ']/}"
   api_key_valid "$key" || die "that does not look like a Protect API key"
 
   config_write "$host" "$port" "$pin"
@@ -67,14 +69,16 @@ cmd_setup() {
 }
 
 cmd_key_set() {
-  local host key
+  local host key=""
   host="$(console_host)"
   if [[ -t 0 ]]; then
     printf 'Paste the Protect API key: ' >&2
-    read -rs key; printf '\n' >&2
+    read -rs key || true
+    printf '\n' >&2
   else
-    read -r key
+    read -r key || true
   fi
+  key="${key//[$'\r\n\t ']/}"
   api_key_valid "$key" || die "that does not look like a Protect API key"
   printf '%s' "$key" | api_key_store "$host"
   unset key

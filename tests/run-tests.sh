@@ -180,6 +180,21 @@ out="$(XDG_CONFIG_HOME="$CFG" ./bin/unifi-protect probe cameras 2>&1)"
 grep -q "usage: unifi-protect probe" <<<"$out"
 check $? "probe rejects a path that is not absolute"
 
+# Piping a key in is the way to set one without it reaching a transcript, and
+# `wl-paste` emits no trailing newline. `read` returns 1 at EOF in that case,
+# which under `set -e` aborted before anything was stored.
+printf '{"console":{"host":"198.51.100.1","port":443,"pin":""}}' > "$CFG/omarchy-unifi/config.json"
+# This is the one test that touches the real Secret Service, since that is what
+# key-set writes to. It uses a documentation-range host so it cannot collide
+# with a real console, and clears the entry immediately.
+out="$(printf 'abcdEFGH0123456789' | XDG_CONFIG_HOME="$CFG" ./bin/unifi-protect key-set 2>&1)"
+! grep -qi "unexpected format\|does not look like" <<<"$out"
+check $? "a key piped without a trailing newline is read, not dropped"
+secret-tool clear application omarchy-unifi kind api-key host 198.51.100.1 2>/dev/null || true
+
+! secret-tool lookup application omarchy-unifi kind api-key host 198.51.100.1 >/dev/null 2>&1
+check $? "the test key is removed from the keyring afterwards"
+
 # ------------------------------------------------- Omalaunch schema conformance
 
 OMALAUNCH="${OMALAUNCH_PATH:-$HOME/Documents/projects/omalaunch}"
