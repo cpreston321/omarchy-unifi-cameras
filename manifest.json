@@ -1,0 +1,49 @@
+{
+  "schemaVersion": 1,
+  "id": "quantumfire.unifi-cameras",
+  "name": "UniFi Cameras",
+  "version": "0.1.0",
+  "author": "Christian Preston",
+  "license": "MIT",
+  "description": "Local-first UniFi Protect camera panel: snapshots, live view in mpv, events, and PTZ presets. No cloud account, no camera daemon.",
+  "kinds": [
+    "bar-widget",
+    "extension"
+  ],
+  "entryPoints": {
+    "barWidget": "BarWidget.qml"
+  },
+  "barWidget": {
+    "displayName": "UniFi Cameras",
+    "description": "Snapshots and live view for UniFi Protect cameras",
+    "category": "System",
+    "defaultSection": "right",
+    "allowMultiple": false,
+    "defaults": {
+      "quality": "high",
+      "refreshSeconds": 30
+    },
+    "schema": [
+      {
+        "key": "quality",
+        "type": "string",
+        "label": "Live stream quality (high, medium, low)"
+      },
+      {
+        "key": "refreshSeconds",
+        "type": "number",
+        "label": "Snapshot refresh interval (seconds)"
+      }
+    ]
+  },
+  "omalaunch": {
+    "extensions": [
+      "omalaunch.json"
+    ],
+    "extensionProviders": [
+      [
+        "./bin/omalaunch-provider"
+      ]
+    ]
+  }
+}

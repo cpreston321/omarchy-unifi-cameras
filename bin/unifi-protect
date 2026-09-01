@@ -1,0 +1,274 @@
+#!/usr/bin/env bash
+# Command-line surface for the UniFi Cameras plugin. The QML panel shells out to
+# this script for everything; nothing in the panel speaks HTTP directly.
+
+set -euo pipefail
+
+SELF_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=../lib/protect.sh
+source "$SELF_DIR/../lib/protect.sh"
+
+usage() {
+  cat <<'USAGE'
+usage: unifi-protect <command> [args]
+
+setup <host> [port]     Pin the console's certificate, store an API key (stdin), verify
+key-set                 Replace the stored API key, read from stdin
+forget                  Remove the stored key and config
+check                   Verify connectivity and print console identity
+cameras [--json]        List cameras
+snapshot <id> [path]    Fetch a JPEG (defaults to the snapshot cache)
+refresh                 Refresh cached snapshots for every connected camera
+stream-url <id> [q]     Print the RTSPS URL for quality q (high|medium|low)
+enable-rtsp <id> [q]    Turn on the RTSP channel a stream URL requires
+play <id> [q]           Open the live stream in mpv
+events [minutes]        Recent events (default 60 minutes)
+ptz-goto <id> <slot>    Move a PTZ camera to a preset slot
+ptz-patrol <id> <slot>  Start a PTZ patrol
+ptz-stop <id>           Stop a PTZ patrol
+export <id>             Save a snapshot into ~/Pictures/UniFi/<date>/
+probe <path>            Raw GET against the integration API, for verification
+USAGE
+}
+
+# ------------------------------------------------------------------ setup
+
+cmd_setup() {
+  local host=${1-} port=${2:-443}
+  # The panel's "Connect a console…" button opens a terminal on `setup` with no
+  # argument, so the host is prompted for rather than required.
+  if [[ -z $host && -t 0 ]]; then
+    printf 'Console IP or hostname: ' >&2
+    read -r host
+  fi
+  [[ -n $host ]] || die "usage: unifi-protect setup <host> [port]"
+  [[ $host =~ ^[A-Za-z0-9._-]+$ ]] || die "invalid host"
+  [[ $port =~ ^[0-9]+$ ]] || die "port must be numeric"
+  require_tools curl jq openssl secret-tool
+
+  local pin
+  pin="$(fetch_pin "$host" "$port")"
+  printf 'Pinned certificate: %s\n' "$pin" >&2
+
+  local key
+  if [[ -t 0 ]]; then
+    printf 'Paste the Protect API key (Control Plane > Integrations): ' >&2
+    read -rs key; printf '\n' >&2
+  else
+    read -r key
+  fi
+  api_key_valid "$key" || die "that does not look like a Protect API key"
+
+  config_write "$host" "$port" "$pin"
+  printf '%s' "$key" | api_key_store "$host"
+  unset key
+
+  cmd_check
+}
+
+cmd_key_set() {
+  local host key
+  host="$(console_host)"
+  if [[ -t 0 ]]; then
+    printf 'Paste the Protect API key: ' >&2
+    read -rs key; printf '\n' >&2
+  else
+    read -r key
+  fi
+  api_key_valid "$key" || die "that does not look like a Protect API key"
+  printf '%s' "$key" | api_key_store "$host"
+  unset key
+  cmd_check
+}
+
+cmd_forget() {
+  # Has to work on a broken config, not just a valid one — a config that fails
+  # to load is exactly when someone reaches for `forget`. The host is read
+  # leniently so a missing or malformed one still leaves the files removed.
+  local host=""
+  if config_present; then
+    host="$(jq -r '.console.host // empty' "$(config_path)" 2>/dev/null || true)"
+  fi
+  [[ -n $host ]] && api_key_clear "$host"
+  rm -f "$(config_path)"
+  rm -rf "$(snapshot_dir)"
+  printf 'Removed stored key, config, and cached snapshots.\n'
+}
+
+cmd_check() {
+  local info
+  info="$(api_request GET /meta/info)"
+  printf '%s\n' "$info" | jq -r '"Connected to \(.applicationVersion // "Protect") on \(.name // "console")"'
+}
+
+# ------------------------------------------------------------------ cameras
+
+cameras_json() { api_request GET /cameras; }
+
+cmd_cameras() {
+  if [[ ${1-} == --json ]]; then
+    cameras_json
+    return
+  fi
+  cameras_json | jq -r '.[] | [.id, (.state // "UNKNOWN"), (.name // "camera")] | @tsv' \
+    | column -t -s "$(printf '\t')"
+}
+
+camera_name() {
+  cameras_json | jq -r --arg id "$1" '.[] | select(.id == $id) | .name // "camera"'
+}
+
+cmd_snapshot() {
+  local id=${1-} out=${2-}
+  [[ -n $id ]] || die "usage: unifi-protect snapshot <id> [path]"
+  [[ -n $out ]] || out="$(snapshot_dir)/${id}.jpg"
+  api_snapshot "$id" "$out"
+}
+
+# Refreshes the cache the panel reads. Failures for one camera never abort the
+# sweep: a single offline doorbell must not blank the whole grid.
+cmd_refresh() {
+  local dir id list tmp
+  dir="$(snapshot_dir)"
+  mkdir -p "$dir"
+  # The Omalaunch provider runs under a five-second budget and must not touch
+  # the network, so the camera list is cached here for it to read offline.
+  list="$(cache_dir)/cameras.json"
+  tmp="$(mktemp "$(cache_dir)/.cameras.XXXXXX")"
+  if cameras_json | jq '[.[] | {id, name, state, type: (.modelKey // "camera"), featureFlags}]' > "$tmp" 2>/dev/null; then
+    mv "$tmp" "$list"
+  else
+    rm -f "$tmp"
+  fi
+  while IFS= read -r id; do
+    [[ -n $id ]] || continue
+    api_snapshot "$id" "$dir/${id}.jpg" >/dev/null 2>&1 || true
+  done < <(cameras_json | jq -r '.[] | select((.state // "") == "CONNECTED") | .id')
+  printf '%s\n' "$dir"
+}
+
+cmd_export() {
+  local id=${1-}
+  [[ -n $id ]] || die "usage: unifi-protect export <id>"
+  local base name stamp out
+  base="$( (xdg-user-dir PICTURES 2>/dev/null) || printf '%s/Pictures' "$HOME")"
+  name="$(camera_name "$id" | tr -cd '[:alnum:]._- ' | tr ' ' '-')"
+  stamp="$(date +%Y-%m-%d)"
+  out="$base/UniFi/$stamp/${name:-camera}-$(date +%H%M%S).jpg"
+  api_snapshot "$id" "$out"
+}
+
+# ------------------------------------------------------------------ streaming
+
+# Protect ships with RTSP off on every channel. The stream URL endpoint returns
+# nothing useful until the channel is enabled, so `play` calls this first.
+cmd_enable_rtsp() {
+  local id=${1-} quality=${2:-high}
+  [[ -n $id ]] || die "usage: unifi-protect enable-rtsp <id> [quality]"
+  local channel
+  case $quality in
+    high) channel=0 ;; medium) channel=1 ;; low) channel=2 ;;
+    *) die "quality must be high, medium, or low" ;;
+  esac
+  api_request PATCH "/cameras/${id}" \
+    "$(jq -nc --argjson ch "$channel" '{channels: [{id: $ch, isRtspEnabled: true}]}')" >/dev/null
+}
+
+cmd_stream_url() {
+  local id=${1-} quality=${2:-high}
+  [[ -n $id ]] || die "usage: unifi-protect stream-url <id> [quality]"
+  local url
+  url="$(api_request GET "/cameras/${id}/rtsps-stream?qualities=${quality}" \
+    | jq -r --arg q "$quality" '.[$q] // empty')"
+  [[ -n $url ]] || die "no ${quality} stream; run 'unifi-protect enable-rtsp $id $quality'"
+  printf '%s\n' "$url"
+}
+
+# The URL carries a per-channel alias that grants stream access, so it goes to
+# mpv through a stdin playlist rather than argv.
+cmd_play() {
+  local id=${1-} quality=${2:-high}
+  [[ -n $id ]] || die "usage: unifi-protect play <id> [quality]"
+  require_tools mpv
+  cmd_enable_rtsp "$id" "$quality" || true
+  local url title
+  url="$(cmd_stream_url "$id" "$quality")"
+  title="$(camera_name "$id")"
+  printf '%s\n' "$url" | mpv --playlist=- \
+    --no-config --load-scripts=no --terminal=no \
+    --profile=low-latency --cache=no --untimed \
+    --title="${title:-UniFi camera}" \
+    --force-media-title="${title:-UniFi camera}" &
+  disown
+}
+
+# ------------------------------------------------------------------ events
+
+cmd_events() {
+  local minutes=${1:-60}
+  [[ $minutes =~ ^[0-9]+$ ]] || die "minutes must be numeric"
+  local now start
+  now=$(( $(date +%s) * 1000 ))
+  start=$(( now - minutes * 60000 ))
+  api_request GET "/events?start=${start}&end=${now}" \
+    | jq -r '.[] | [((.start // 0) / 1000 | strftime("%H:%M:%S")), (.type // "event"), (.camera // "")] | @tsv'
+}
+
+# ------------------------------------------------------------------ PTZ
+
+cmd_ptz_goto() {
+  local id=${1-} slot=${2-}
+  [[ -n $id && $slot =~ ^-?[0-9]+$ ]] || die "usage: unifi-protect ptz-goto <id> <slot>"
+  api_request POST "/cameras/${id}/ptz/goto/${slot}" >/dev/null
+}
+
+cmd_ptz_patrol() {
+  local id=${1-} slot=${2-}
+  [[ -n $id && $slot =~ ^[0-9]+$ ]] || die "usage: unifi-protect ptz-patrol <id> <slot>"
+  api_request POST "/cameras/${id}/ptz/patrol/start/${slot}" >/dev/null
+}
+
+cmd_ptz_stop() {
+  local id=${1-}
+  [[ -n $id ]] || die "usage: unifi-protect ptz-stop <id>"
+  api_request POST "/cameras/${id}/ptz/patrol/stop" >/dev/null
+}
+
+# ------------------------------------------------------------------ probe
+
+# Escape hatch for confirming what a specific firmware actually exposes, so a
+# shape mismatch can be diagnosed without editing the plugin.
+cmd_probe() {
+  local path=${1-}
+  [[ $path == /* ]] || die "usage: unifi-protect probe /cameras"
+  api_request GET "$path"
+}
+
+# ------------------------------------------------------------------ dispatch
+
+main() {
+  local cmd=${1-}
+  [[ $# -gt 0 ]] && shift || true
+  case $cmd in
+    setup)       cmd_setup "$@" ;;
+    key-set)     cmd_key_set "$@" ;;
+    forget)      cmd_forget "$@" ;;
+    check)       cmd_check "$@" ;;
+    cameras)     cmd_cameras "$@" ;;
+    snapshot)    cmd_snapshot "$@" ;;
+    refresh)     cmd_refresh "$@" ;;
+    export)      cmd_export "$@" ;;
+    enable-rtsp) cmd_enable_rtsp "$@" ;;
+    stream-url)  cmd_stream_url "$@" ;;
+    play)        cmd_play "$@" ;;
+    events)      cmd_events "$@" ;;
+    ptz-goto)    cmd_ptz_goto "$@" ;;
+    ptz-patrol)  cmd_ptz_patrol "$@" ;;
+    ptz-stop)    cmd_ptz_stop "$@" ;;
+    probe)       cmd_probe "$@" ;;
+    ""|-h|--help|help) usage ;;
+    *)           usage >&2; exit 2 ;;
+  esac
+}
+
+main "$@"

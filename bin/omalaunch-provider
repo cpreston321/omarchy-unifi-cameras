@@ -1,0 +1,146 @@
+#!/usr/bin/env python3
+"""Emit an Omalaunch workflow extension listing the configured cameras.
+
+Omalaunch gives every provider a five-second budget and asks that generation be
+deterministic, fast, and offline. So this reads the camera list that
+`unifi-protect refresh` caches rather than calling the console: a launcher
+keystroke must never wait on an NVR that is booting or unreachable.
+"""
+
+import json
+import os
+import re
+import sys
+
+CACHE = os.path.join(
+    os.environ.get("XDG_CACHE_HOME") or os.path.expanduser("~/.cache"),
+    "omarchy-unifi",
+    "cameras.json",
+)
+CLI = "{extensionDir}/bin/unifi-protect"
+
+# Ids come from the console, so they are constrained before being placed in an
+# argument array or used as a workflow node id.
+ID_RE = re.compile(r"^[A-Za-z0-9]{4,64}$")
+
+
+def load_cameras():
+    try:
+        with open(CACHE, "r", encoding="utf-8") as handle:
+            data = json.load(handle)
+    except (OSError, ValueError):
+        return []
+    if not isinstance(data, list):
+        return []
+
+    cameras = []
+    for entry in data:
+        if not isinstance(entry, dict):
+            continue
+        cam_id = str(entry.get("id") or "")
+        if not ID_RE.match(cam_id):
+            continue
+        name = str(entry.get("name") or "Camera").strip()[:64] or "Camera"
+        flags = entry.get("featureFlags")
+        can_ptz = bool(isinstance(flags, dict) and flags.get("canOpticalZoom")) or bool(
+            isinstance(flags, dict) and flags.get("isPtz")
+        )
+        cameras.append(
+            {
+                "id": cam_id,
+                "name": name,
+                "state": str(entry.get("state") or "UNKNOWN"),
+                "ptz": can_ptz,
+            }
+        )
+    cameras.sort(key=lambda c: c["name"].lower())
+    return cameras[:64]
+
+
+def action(node_id, label, description, argv, prompt="Press Enter"):
+    """A workflow leaf that just runs a command.
+
+    Omalaunch's workflow tree has no 'menu item that dispatches' node — only
+    `input` nodes carry commands — so an action is an input that accepts empty
+    text and runs `emptyCommand`.
+    """
+    return {
+        "id": node_id,
+        "kind": "input",
+        "label": label,
+        "description": description,
+        "prompt": prompt,
+        "allowEmpty": True,
+        "command": argv,
+        "emptyCommand": argv,
+    }
+
+
+def camera_node(camera):
+    items = [
+        action(
+            "live",
+            "Live view",
+            "Open the high-quality stream in mpv",
+            [CLI, "play", camera["id"], "high"],
+        ),
+        action(
+            "live-low",
+            "Live view (low bandwidth)",
+            "Open the low-quality stream in mpv",
+            [CLI, "play", camera["id"], "low"],
+        ),
+        action(
+            "snapshot",
+            "Save a snapshot",
+            "Write a JPEG into ~/Pictures/UniFi/",
+            [CLI, "export", camera["id"]],
+        ),
+    ]
+    if camera["ptz"]:
+        items.append(
+            {
+                "id": "preset",
+                "kind": "input",
+                "label": "Go to preset…",
+                "description": "Move this PTZ camera to a preset slot",
+                "prompt": "Preset slot",
+                "maxLength": 4,
+                "command": [CLI, "ptz-goto", camera["id"], "{input}"],
+            }
+        )
+    return {
+        "id": "cam-" + camera["id"],
+        "kind": "menu",
+        "label": camera["name"],
+        "description": "Disconnected" if camera["state"] != "CONNECTED" else "Connected",
+        "items": items,
+    }
+
+
+def main():
+    cameras = load_cameras()
+    if not cameras:
+        # No cache yet means no console is set up. Emitting nothing keeps the
+        # launcher clean; the setup extension in omalaunch.json is the entry point.
+        json.dump([], sys.stdout)
+        return
+
+    extension = {
+        "schemaVersion": 1,
+        "id": "quantumfire.unifi-cameras",
+        "capability": "unifi-cameras",
+        "mode": "workflow",
+        "label": "UniFi Cameras",
+        "prefixes": ["cam"],
+        "icon": "󰞮",
+        "description": "Open a camera",
+        "rootDescription": "Live view, snapshots, and PTZ presets",
+        "requires": ["curl", "jq", "mpv", "secret-tool"],
+        "workflow": {"items": [camera_node(camera) for camera in cameras]},
+    }
+    json.dump(extension, sys.stdout)
+
+
+if __name__ == "__main__":
+    main()

@@ -1,0 +1,20 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install shellcheck
+        run: sudo apt-get update && sudo apt-get install -y shellcheck jq
+
+      # qmllint and the Omarchy shell are not present on the runner, so those
+      # checks report as skipped. They run locally on an Omarchy machine.
+      - name: Run tests
+        run: ./tests/run-tests.sh
