@@ -6,6 +6,8 @@ official local integration API, an API key stored in the Secret Service, and a
 pinned certificate. No Ubiquiti account, no cloud round-trip, no camera daemon
 added to Omarchy.
 
+![The UniFi Cameras panel](preview.png)
+
 > **Status: `0.1.0`, verified against UniFi Protect 7.2.105.** Setup, camera
 > listing, snapshots, and the panel are confirmed working on real hardware.
 > Live video is confirmed working through mpv (HEVC 4K over RTSPS) once RTSP is
