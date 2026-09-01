@@ -306,6 +306,33 @@ check $? "the model is not repeated under the camera button"
 grep -q 'label: "Model"' Panel.qml
 check $? "the model is still reported in the details list"
 
+# Settings the API rejects must never reach the UI. isMicEnabled reads as
+# writable on the camera object and is not; verified on Protect 7.2.105.
+grep -q "toggle_apply" bin/unifi-protect
+check $? "settings go through one place that names what is writable"
+
+! grep -q "isMicEnabled" Panel.qml
+check $? "the panel offers no toggle for a read-only field"
+
+for setting in led osd-name osd-date osd-logo; do
+  grep -q "$setting)" bin/unifi-protect
+  check $? "the CLI accepts the '$setting' setting"
+done
+
+./bin/unifi-protect toggle someid bogus on 2>&1 | grep -q "unknown setting"
+check $? "an unknown setting is refused before any request"
+
+./bin/unifi-protect toggle someid led maybe 2>&1 | grep -q "state must be on or off"
+check $? "a non-boolean state is refused before any request"
+
+# objectTypes is replaced wholesale, so it is rebuilt from what the console
+# reports rather than from anything this process cached.
+grep -q "smartDetectSettings.objectTypes" bin/unifi-protect
+check $? "detection toggles read the live list before rewriting it"
+
+grep -q "root.loadCameras()" Panel.qml
+check $? "a switch follows the console's answer rather than the press"
+
 # KeyboardPanel already insets its content by popupPadding; margins here are
 # padding on top of padding.
 ! grep -q "anchors.margins: Style.space(16)" Panel.qml

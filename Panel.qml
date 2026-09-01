@@ -126,6 +126,43 @@ Panel {
     root.refreshSelected()
   }
 
+  property bool settingsOpen: false
+
+  // Rows are derived from the camera the console reports, so the switches show
+  // what is actually set rather than what was last pressed.
+  readonly property var settingRows: {
+    var camera = root.selected
+    if (!camera) return []
+    var rows = [
+      { key: "led",      label: "Status LED",      on: camera.led },
+      { key: "osd-date", label: "Timestamp overlay", on: camera.osdDate },
+      { key: "osd-name", label: "Name overlay",    on: camera.osdName },
+      { key: "osd-logo", label: "Logo overlay",    on: camera.osdLogo }
+    ]
+    var supported = camera.detectSupported || []
+    for (var i = 0; i < supported.length; i++) {
+      var kind = String(supported[i])
+      rows.push({
+        key: "detect-" + kind,
+        label: "Detect " + kind.replace(/([a-z])([A-Z])/g, "$1 $2").toLowerCase(),
+        on: (camera.detectEnabled || []).indexOf(kind) >= 0
+      })
+    }
+    return rows
+  }
+
+  property string pendingSetting: ""
+
+  // The switch is not moved optimistically: the console is the authority on
+  // whether a setting took, so the camera list is re-read and the row follows
+  // whatever came back.
+  function applySetting(key, enabled) {
+    if (!root.selected || root.pendingSetting !== "") return
+    root.pendingSetting = key
+    settingProcess.command = [root.cli, "toggle", root.selected.id, key, enabled ? "on" : "off"]
+    settingProcess.running = true
+  }
+
   function refreshSelected() {
     if (!root.selected || detailShotProcess.running) return
     detailShotProcess.command = [root.cli, "snapshot", root.selected.id]
@@ -282,6 +319,9 @@ Panel {
           if (!entry || !entry.id) continue
           var smart = entry.smartDetectSettings && entry.smartDetectSettings.objectTypes
             ? entry.smartDetectSettings.objectTypes : []
+          var osd = entry.osdSettings || {}
+          var led = entry.ledSettings || {}
+          var flags = entry.featureFlags || {}
           rows.push({
             id: String(entry.id),
             name: String(entry.name || "Camera"),
@@ -289,7 +329,13 @@ Panel {
             model: String(entry.type || "Camera"),
             mic: entry.isMicEnabled === true,
             hdr: String(entry.hdrType || ""),
-            smart: smart.join(", ")
+            smart: smart.join(", "),
+            osdName: osd.isNameEnabled === true,
+            osdDate: osd.isDateEnabled === true,
+            osdLogo: osd.isLogoEnabled === true,
+            led: led.isEnabled === true,
+            detectSupported: Array.isArray(flags.smartDetectTypes) ? flags.smartDetectTypes : [],
+            detectEnabled: smart
           })
         }
         rows.sort(function(a, b) { return a.name.localeCompare(b.name) })
@@ -316,6 +362,17 @@ Panel {
       root.loadCameras()
     }
     stderr: StdioCollector { id: refreshStderr; waitForEnd: true }
+  }
+
+  property Process settingProcess: Process {
+    onExited: function(exitCode) {
+      root.pendingSetting = ""
+      if (exitCode !== 0) {
+        root.toast = "Could not change that setting"
+        toastTimer.restart()
+      }
+      root.loadCameras()
+    }
   }
 
   property Process playProcess: Process {}
@@ -1020,6 +1077,91 @@ Panel {
         }
       }
 
+
+      // Collapsed by default: these are set-and-forget, and the panel is for
+      // looking at cameras. Only the settings the API actually accepts are
+      // offered — the rest of the camera object is read-only.
+      Rectangle {
+        Layout.fillWidth: true
+        Layout.topMargin: Style.space(14)
+        Layout.preferredHeight: Style.spacing.controlHeight
+        radius: Style.cornerRadius
+        visible: root.selected !== null && root.settingRows.length > 0
+        color: settingsHover.hovered ? Style.hoverFill : "transparent"
+
+        RowLayout {
+          anchors.fill: parent
+          anchors.leftMargin: Style.space(2)
+          anchors.rightMargin: Style.space(6)
+          spacing: Style.space(6)
+
+          Label {
+            Layout.fillWidth: true
+            text: "SETTINGS"
+            color: root.contentForeground
+            font.family: root.contentFontFamily
+            font.pixelSize: Style.font.caption
+            font.bold: true
+            font.letterSpacing: 0.5
+            opacity: 0.45
+          }
+
+          Label {
+            text: root.settingsOpen ? "\udb80\udd43" : "\udb80\udd40"
+            color: root.contentForeground
+            font.family: root.contentFontFamily
+            font.pixelSize: Style.font.bodySmall
+            opacity: 0.45
+          }
+        }
+
+        HoverHandler {
+          id: settingsHover
+          cursorShape: Qt.PointingHandCursor
+        }
+
+        TapHandler {
+          onSingleTapped: root.settingsOpen = !root.settingsOpen
+        }
+      }
+
+      ColumnLayout {
+        Layout.fillWidth: true
+        Layout.topMargin: root.settingsOpen ? Style.space(6) : 0
+        spacing: Style.space(2)
+        visible: root.settingsOpen && root.selected !== null
+
+        Repeater {
+          model: root.settingRows
+
+          delegate: RowLayout {
+            required property var modelData
+            Layout.fillWidth: true
+            Layout.preferredHeight: Style.spacing.controlHeight
+            spacing: Style.space(10)
+
+            Label {
+              Layout.fillWidth: true
+              text: modelData.label
+              elide: Text.ElideRight
+              color: root.contentForeground
+              font.family: root.contentFontFamily
+              font.pixelSize: Style.font.bodySmall
+              opacity: root.selected && root.selected.connected ? 0.75 : 0.4
+            }
+
+            ToggleSwitch {
+              checked: modelData.on
+              busy: root.pendingSetting === modelData.key
+              // An offline camera cannot be reconfigured, and a second write
+              // while one is in flight would race the read that follows it.
+              interactive: root.selected !== null && root.selected.connected
+                && root.pendingSetting === ""
+              onToggled: root.applySetting(modelData.key, !modelData.on)
+            }
+          }
+        }
+      }
     }
   }
 }

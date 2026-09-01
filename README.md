@@ -79,6 +79,23 @@ unifi-protect probe /cameras       # raw API response
 
 `unifi-protect` with no arguments lists everything.
 
+## Camera settings
+
+A collapsed **Settings** section under the details list exposes the camera
+settings the integration API will actually accept: the status LED, the
+timestamp / name / logo overlays burned into the picture, and which smart
+detection types are active. Switches follow what the console reports rather
+than what was pressed, so a rejected change corrects itself.
+
+Verified writable on Protect 7.2.105 by sending each field back with its own
+value. `isMicEnabled` looks writable and is not; anything outside the accepted
+set is rejected with an AJV additional-properties error. From a terminal:
+
+```bash
+unifi-protect toggle <id> osd-date off
+unifi-protect toggle <id> detect-person on
+```
+
 ## Widget settings
 
 Set on the bar entry in `~/.config/omarchy/shell.json`:

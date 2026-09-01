@@ -23,6 +23,7 @@ cameras [--json]        List cameras
 snapshot <id> [path]    Fetch a JPEG (defaults to the snapshot cache)
 refresh                 Refresh cached snapshots for every connected camera
 stream-url <id> [q]     Print the RTSPS URL for quality q (high|medium|low)
+toggle <id> <k> <on|off> Set led, osd-name, osd-date, osd-logo, or detect-<type>
 play <id> [q]           Open the live stream in mpv
 relay <id> [q]          Remux the stream to loopback HTTP for the panel (foreground)
 ptz-goto <id> <slot>    Move a PTZ camera to a preset slot
@@ -330,6 +331,53 @@ cmd_export() {
   api_snapshot "$id" "$out"
 }
 
+# ---------------------------------------------------------------- settings
+
+# Camera settings the integration API will actually accept. Verified writable
+# on Protect 7.2.105 by sending each field back with its current value:
+# isMicEnabled looks writable and is not, and anything outside this map is
+# rejected outright with an AJV additional-properties error.
+#
+# A partial sub-object is accepted, so a single flag does not require sending
+# the whole settings blob back and racing whatever else changed it.
+toggle_apply() {
+  local id=$1 setting=$2 enabled=$3
+  case $setting in
+    led)      api_request PATCH "/cameras/${id}" \
+                "$(jq -nc --argjson v "$enabled" '{ledSettings: {isEnabled: $v}}')" ;;
+    osd-name) api_request PATCH "/cameras/${id}" \
+                "$(jq -nc --argjson v "$enabled" '{osdSettings: {isNameEnabled: $v}}')" ;;
+    osd-date) api_request PATCH "/cameras/${id}" \
+                "$(jq -nc --argjson v "$enabled" '{osdSettings: {isDateEnabled: $v}}')" ;;
+    osd-logo) api_request PATCH "/cameras/${id}" \
+                "$(jq -nc --argjson v "$enabled" '{osdSettings: {isLogoEnabled: $v}}')" ;;
+    detect-*)
+      # objectTypes is a whole array, so this one alone is read-modify-write.
+      # The list is rebuilt from what the console reports right now rather than
+      # from anything cached, so a change made in the Protect app is not undone.
+      local kind=${setting#detect-} current
+      current="$(api_request GET "/cameras/${id}" | jq -c '.smartDetectSettings.objectTypes // []')"
+      api_request PATCH "/cameras/${id}" "$(jq -nc \
+        --argjson list "$current" --arg kind "$kind" --argjson on "$enabled" \
+        '{smartDetectSettings: {objectTypes:
+          (if $on then ($list + [$kind] | unique) else ($list - [$kind]) end)}}')" ;;
+    *) die "unknown setting '$setting'" ;;
+  esac
+}
+
+cmd_toggle() {
+  local id=${1-} setting=${2-} state=${3-}
+  [[ -n $id && -n $setting && -n $state ]] \
+    || die "usage: unifi-protect toggle <id> <setting> <on|off>"
+  local enabled
+  case $state in
+    on|true|1)  enabled=true ;;
+    off|false|0) enabled=false ;;
+    *) die "state must be on or off" ;;
+  esac
+  toggle_apply "$id" "$setting" "$enabled" >/dev/null
+}
+
 # ------------------------------------------------------------------ streaming
 
 # Verified against Protect 7.2.105: the integration API's camera object has no
@@ -509,6 +557,7 @@ main() {
     export)      cmd_export "$@" ;;
     stream-url)  cmd_stream_url "$@" ;;
     play)        cmd_play "$@" ;;
+    toggle)      cmd_toggle "$@" ;;
     ptz-goto)    cmd_ptz_goto "$@" ;;
     ptz-patrol)  cmd_ptz_patrol "$@" ;;
     ptz-stop)    cmd_ptz_stop "$@" ;;
