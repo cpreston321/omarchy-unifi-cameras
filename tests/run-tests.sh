@@ -137,16 +137,23 @@ check $? "forget succeeds without a usable config"
 # A configured console with no key in the keyring is the state right after
 # `setup` is interrupted. It must report the missing key once, not follow up
 # with a bogus complaint about the key's format.
+#
+# Gated on secret-tool: without it the CLI stops earlier, at the missing
+# dependency, and these would pass for the wrong reason rather than fail.
 printf '{"console":{"host":"198.51.100.1","port":443,"pin":""}}' > "$CFG/omarchy-unifi/config.json"
-out="$(XDG_CONFIG_HOME="$CFG" ./bin/unifi-protect check 2>&1)"
-[[ $(wc -l <<<"$out") -eq 1 ]]
-check $? "a missing API key reports exactly one error"
+if command -v secret-tool >/dev/null 2>&1; then
+  out="$(XDG_CONFIG_HOME="$CFG" ./bin/unifi-protect check 2>&1)"
+  [[ $(wc -l <<<"$out") -eq 1 ]]
+  check $? "a missing API key reports exactly one error"
 
-grep -q "no API key stored" <<<"$out"
-check $? "the missing-key error names the fix"
+  grep -q "no API key stored" <<<"$out"
+  check $? "the missing-key error names the fix"
 
-! grep -q "unexpected format" <<<"$out"
-check $? "a missing key is not also reported as malformed"
+  ! grep -q "unexpected format" <<<"$out"
+  check $? "a missing key is not also reported as malformed"
+else
+  skipt "secret-tool not installed; missing-key reporting not exercised"
+fi
 
 # The panel decides which screen to show from `status`, so it must classify
 # every setup state, always succeed, and never emit the key itself.
@@ -185,14 +192,19 @@ check $? "probe rejects a path that is not absolute"
 printf '{"console":{"host":"198.51.100.1","port":443,"pin":""}}' > "$CFG/omarchy-unifi/config.json"
 # This is the one test that touches the real Secret Service, since that is what
 # key-set writes to. It uses a documentation-range host so it cannot collide
-# with a real console, and clears the entry immediately.
-out="$(printf 'abcdEFGH0123456789' | XDG_CONFIG_HOME="$CFG" ./bin/unifi-protect key-set 2>&1)"
-! grep -qi "unexpected format\|does not look like" <<<"$out"
-check $? "a key piped without a trailing newline is read, not dropped"
-secret-tool clear application omarchy-unifi kind api-key host 198.51.100.1 2>/dev/null || true
+# with a real console, and clears the entry immediately. Without a keyring the
+# store fails for an unrelated reason, so the assertion would be meaningless.
+if command -v secret-tool >/dev/null 2>&1 && secret-tool search --all application omarchy-unifi >/dev/null 2>&1; then
+  out="$(printf 'abcdEFGH0123456789' | XDG_CONFIG_HOME="$CFG" ./bin/unifi-protect key-set 2>&1)"
+  ! grep -qi "unexpected format\|does not look like" <<<"$out"
+  check $? "a key piped without a trailing newline is read, not dropped"
+  secret-tool clear application omarchy-unifi kind api-key host 198.51.100.1 2>/dev/null || true
 
-! secret-tool lookup application omarchy-unifi kind api-key host 198.51.100.1 >/dev/null 2>&1
-check $? "the test key is removed from the keyring afterwards"
+  ! secret-tool lookup application omarchy-unifi kind api-key host 198.51.100.1 >/dev/null 2>&1
+  check $? "the test key is removed from the keyring afterwards"
+else
+  skipt "no usable Secret Service; key storage not exercised"
+fi
 
 # Hardware findings, pinned so a refactor cannot quietly reintroduce them.
 # Verified against UniFi Protect 7.2.105.

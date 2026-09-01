@@ -492,8 +492,10 @@ cmd_relay() {
 }
 
 pick_free_port() {
-  local port attempt
-  for attempt in $(seq 1 40); do
+  local port
+  # The loop counter is unused: each pass is an independent attempt at a
+  # random port, not a sequence.
+  for _ in $(seq 1 40); do
     port=$(( 20000 + RANDOM % 20000 ))
     ss -ltnH "sport = :${port}" 2>/dev/null | grep -q . || { printf '%s\n' "$port"; return; }
   done
