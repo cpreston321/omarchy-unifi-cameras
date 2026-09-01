@@ -284,6 +284,11 @@ check $? "snapshots are decoded at display size rather than scaled from 4K"
 grep -q "root.cameras.length > 1" Panel.qml
 check $? "the camera selector hides when there is only one camera"
 
+# KeyboardPanel already insets its content by popupPadding; margins here are
+# padding on top of padding.
+! grep -q "anchors.margins: Style.space(16)" Panel.qml
+check $? "the content does not double up on the panel's own padding"
+
 # A single spacing value makes every gap equally important, so nothing groups.
 [[ $(grep -c "Layout.topMargin" Panel.qml) -ge 8 ]]
 check $? "vertical gaps are set per boundary rather than inherited"

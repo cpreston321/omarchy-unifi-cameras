@@ -429,7 +429,7 @@ Panel {
     // with one camera and clips one with several, and the difference between
     // the setup message and a full camera view is most of the panel.
     contentHeight: panel.fittedContentHeight(
-      root.ready ? cameraView.implicitHeight + Style.space(32) : Style.space(300))
+      root.ready ? cameraView.implicitHeight : Style.space(300))
 
     PanelKeyCatcher {
       id: keyCatcher
@@ -510,10 +510,12 @@ Panel {
 
     // --------------------------------------------------------------- camera
 
+    // No margins of its own: KeyboardPanel already insets its content by
+    // Style.spacing.popupPadding, so anything added here is padding on top of
+    // padding — which is what made the panel look over-inset.
     ColumnLayout {
       id: cameraView
       anchors.fill: parent
-      anchors.margins: Style.space(16)
       spacing: 0
       visible: root.ready
 
