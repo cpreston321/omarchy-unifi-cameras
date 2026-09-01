@@ -282,7 +282,21 @@ grep -q "sourceSize.width" Panel.qml
 check $? "snapshots are decoded at display size rather than scaled from 4K"
 
 grep -q "root.cameras.length > 1" Panel.qml
-check $? "the camera selector hides when there is only one camera"
+check $? "the camera control is inert when there is only one camera"
+
+# The chip row and the header name were two controls for one job.
+! grep -q "Flow {" Panel.qml
+check $? "the chip selector is gone; the name button replaces it"
+
+grep -q "cameraMenu" Panel.qml
+check $? "the name button opens a camera menu"
+
+grep -q "blocked: cameraMenu.opened" Panel.qml
+check $? "Escape dismisses the camera menu before closing the panel"
+
+# Status is an icon now, so the subtitle should not also spell it out.
+! grep -q '"Online" : "Offline") + " · "' Panel.qml
+check $? "the subtitle no longer repeats the online state"
 
 # KeyboardPanel already insets its content by popupPadding; margins here are
 # padding on top of padding.

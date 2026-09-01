@@ -435,6 +435,7 @@ Panel {
     PanelKeyCatcher {
       id: keyCatcher
       anchors.fill: parent
+      blocked: cameraMenu.opened
       onCloseRequested: root.close()
       onTabRequested: function(direction) { root.switchPanel(direction) }
     }
@@ -570,28 +571,9 @@ Panel {
 
       // Camera chips. A Flow rather than a Row so a console with many cameras
       // wraps instead of pushing the selected one off the edge.
-      // A selector for one camera is just its name printed twice, directly
-      // above the header that already names it.
-      Flow {
-        Layout.fillWidth: true
-        Layout.topMargin: Style.space(14)
-        visible: root.cameras.length > 1
-        spacing: Style.space(6)
-
-        Repeater {
-          model: root.cameras
-
-          delegate: Button {
-            required property var modelData
-            bordered: true
-            selected: root.selected && root.selected.id === modelData.id
-            text: modelData.name
-            onClicked: root.selectCamera(modelData)
-          }
-        }
-      }
-
-      // Selected camera header
+      // Selected camera header. The name is the selector: one control that
+      // reads as a button, carries the online state, and scales from one
+      // camera to twenty — where a row of chips stopped fitting.
       RowLayout {
         Layout.fillWidth: true
         Layout.topMargin: Style.space(16)
@@ -600,23 +582,141 @@ Panel {
 
         ColumnLayout {
           Layout.fillWidth: true
-          spacing: Style.space(1)
+          spacing: Style.space(3)
 
-          Label {
-            Layout.fillWidth: true
-            text: root.selected ? root.selected.name : ""
-            elide: Text.ElideRight
-            color: root.contentForeground
-            font.family: root.contentFontFamily
-            font.pixelSize: Style.font.subtitle
-            font.bold: true
+          Rectangle {
+            id: cameraButton
+            Layout.preferredHeight: Style.spacing.controlHeight
+            Layout.preferredWidth: Math.min(
+              cameraButtonRow.implicitWidth + Style.space(20),
+              cameraButton.parent.width)
+            radius: Style.cornerRadius
+
+            // With one camera there is nothing to choose, so the control keeps
+            // the status and the name but stops pretending to be pressable.
+            readonly property bool interactive: root.cameras.length > 1
+            readonly property bool hot: cameraHover.hovered && interactive
+
+            color: hot ? Style.hoverFill : Style.normalFill
+            border.width: hot ? Math.max(1, Style.space(2)) : Style.normalBorderWidth
+            border.color: hot ? Color.accent : Style.normalBorderColor
+
+            RowLayout {
+              id: cameraButtonRow
+              anchors.centerIn: parent
+              spacing: Style.space(7)
+
+              Rectangle {
+                Layout.preferredWidth: Style.space(7)
+                Layout.preferredHeight: Style.space(7)
+                radius: width / 2
+                color: root.selected && root.selected.connected ? Color.accent : Color.urgent
+              }
+
+              Label {
+                text: root.selected ? root.selected.name : ""
+                elide: Text.ElideRight
+                color: root.contentForeground
+                font.family: root.contentFontFamily
+                font.pixelSize: Style.font.subtitle
+                font.bold: true
+              }
+
+              Label {
+                visible: cameraButton.interactive
+                text: "\udb80\udd40"
+                color: root.contentForeground
+                font.family: root.contentFontFamily
+                font.pixelSize: Style.font.bodySmall
+                opacity: 0.55
+              }
+            }
+
+            HoverHandler {
+              id: cameraHover
+              cursorShape: cameraButton.interactive ? Qt.PointingHandCursor : Qt.ArrowCursor
+            }
+
+            TapHandler {
+              enabled: cameraButton.interactive
+              onSingleTapped: cameraMenu.opened ? cameraMenu.close() : cameraMenu.open()
+            }
+
+            Popup {
+              id: cameraMenu
+              x: 0
+              y: cameraButton.height + Style.space(4)
+              width: Math.max(cameraButton.width, Style.space(200))
+              padding: Style.space(4)
+              focus: true
+
+              background: Rectangle {
+                color: Color.popups.background
+                border.width: Style.normalBorderWidth
+                border.color: Color.popups.border
+                radius: Style.cornerRadius
+              }
+
+              contentItem: ColumnLayout {
+                spacing: Style.space(1)
+
+                Repeater {
+                  model: root.cameras
+
+                  delegate: Rectangle {
+                    required property var modelData
+                    Layout.fillWidth: true
+                    Layout.preferredHeight: Style.spacing.popupRowHeight
+                    radius: Style.space(3)
+                    readonly property bool current: root.selected && root.selected.id === modelData.id
+                    color: rowHover.hovered ? Style.hoverFill
+                      : (current ? Style.selectedFill : "transparent")
+
+                    RowLayout {
+                      anchors.fill: parent
+                      anchors.leftMargin: Style.space(9)
+                      anchors.rightMargin: Style.space(9)
+                      spacing: Style.space(7)
+
+                      Rectangle {
+                        Layout.preferredWidth: Style.space(7)
+                        Layout.preferredHeight: Style.space(7)
+                        radius: width / 2
+                        color: modelData.connected ? Color.accent : Color.urgent
+                      }
+
+                      Label {
+                        Layout.fillWidth: true
+                        text: modelData.name
+                        elide: Text.ElideRight
+                        color: root.contentForeground
+                        font.family: root.contentFontFamily
+                        font.pixelSize: Style.font.bodySmall
+                      }
+                    }
+
+                    HoverHandler {
+                      id: rowHover
+                      cursorShape: Qt.PointingHandCursor
+                    }
+
+                    TapHandler {
+                      onSingleTapped: {
+                        root.selectCamera(modelData)
+                        cameraMenu.close()
+                      }
+                    }
+                  }
+                }
+              }
+            }
           }
 
+          // The dot carries the online state now, so this says what the camera
+          // is rather than repeating that it is up.
           Label {
             Layout.fillWidth: true
-            text: root.selected
-              ? (root.selected.connected ? "Online" : "Offline") + " · " + root.selected.model
-              : ""
+            text: root.selected ? root.selected.model : ""
             elide: Text.ElideRight
             color: root.contentForeground
             font.family: root.contentFontFamily
@@ -626,6 +726,7 @@ Panel {
         }
 
         Button {
+          Layout.alignment: Qt.AlignTop
           iconText: "\uf021"
           tooltipText: "Refresh snapshot"
           enabled: root.selected !== null && root.selected.connected
@@ -634,7 +735,6 @@ Panel {
         }
       }
 
-      // Stage
       Rectangle {
         id: stage
         Layout.fillWidth: true
