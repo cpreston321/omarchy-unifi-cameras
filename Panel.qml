@@ -703,7 +703,7 @@ Panel {
               text: root.liveMode === "live" ? "Live"
                 : (root.liveMode === "connecting" ? "Connecting…"
                   : (root.wantLive ? "Live · stills"
-                    : (root.shotAt ? "Snapshot · " + root.shotAge : "Snapshot"))))
+                    : (root.shotAt ? "Snapshot · " + root.shotAge : "Snapshot")))
               color: "#ffffff"
               font.family: root.contentFontFamily
               font.pixelSize: Style.font.caption

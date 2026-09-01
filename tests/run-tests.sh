@@ -41,8 +41,8 @@ if [[ -x $QMLLINT ]] && [[ -d ${OMARCHY_PATH:-/usr/share/omarchy}/shell ]]; then
   ln -sfn "${OMARCHY_PATH:-/usr/share/omarchy}/shell" "$qmlroot/qs"
   lint="$("$QMLLINT" -I "$qmlroot" BarWidget.qml Panel.qml 2>&1)"
   rm -rf "$qmlroot"
-  ! grep -qE "^Error:|layout-positioning|property-override" <<<"$lint"
-  check $? "qmllint reports no errors, layout, or shadowed-property warnings"
+  ! grep -qE "^Error:|Expected token|Unexpected token|Syntax error|Unterminated|layout-positioning|property-override" <<<"$lint"
+  check $? "qmllint reports no parse errors, layout, or shadowed-property warnings"
 else
   skipt "qmllint or the Omarchy shell is not available"
 fi
